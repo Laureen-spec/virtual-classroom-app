@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import API from "../api/axios";
 import ActiveLiveClasses from "../components/ActiveLiveClasses";
 import AdminPayments from "../components/AdminPayments";
-import NotificationBell from "../components/Notificationbell";
+//import NotificationBell from "../components/Notificationbell";
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
