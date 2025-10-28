@@ -36,7 +36,15 @@ dotenv.config();
 const app = express();
 
 // ✅ Middlewares (always before routes)
-app.use(cors());
+app.use(
+  cors({
+    origin: "https://virtual-classroom-app-three.vercel.app", // your frontend URL
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"], // allowed HTTP methods
+    credentials: true, // allow sending cookies or auth headers
+    allowedHeaders: ["Content-Type", "Authorization"], // headers allowed
+  })
+);
+
 app.use(express.json());
 
 // ✅ Static folder to serve uploaded files
