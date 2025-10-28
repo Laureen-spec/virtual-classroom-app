@@ -4,7 +4,7 @@ import RegisterPage from "./pages/RegisterPage";
 import StudentDashboard from "./pages/StudentDashboard";
 import TeacherDashboard from "./pages/TeacherDashboard";
 import AdminDashboard from "./pages/AdminDashboard";
-import LiveClass from "./pages/Liveclass.jsx";
+import LiveClass from "./pages/LiveClass.jsx";
 import SchedulePage from "./pages/SchedulePage.jsx";
 import AdminReports from "./pages/AdminReports";
 import SubscriptionPage from "./pages/SubscriptionPage";
