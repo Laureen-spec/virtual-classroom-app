@@ -1,7 +1,7 @@
 import axios from "axios";
 
 const API = axios.create({
-  baseURL: "https://virtual-classroom-app-8wbh.onrender.com", // backend base path
+  baseURL: "https://virtual-classroom-app-8wbh.onrender.com/api", // backend base path
 });
 
 // ✅ Automatically attach token to all secured routes
