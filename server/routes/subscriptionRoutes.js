@@ -5,14 +5,24 @@ import { verifyToken, roleCheck } from "../middleware/authMiddleware.js";
 const router = express.Router();
 
 /* ===================================================
-   📋 GET ALL SUBSCRIPTIONS (Admin Only)
+   📋 GET SUBSCRIPTIONS (Admin & Student) - UPDATED
 =================================================== */
-router.get("/", verifyToken, roleCheck(["admin","student"]), async (req, res) => {
+router.get("/", verifyToken, roleCheck(["admin", "student"]), async (req, res) => {
   try {
-    const subs = await Subscription.find()
-      .populate("student", "name email") // Populate student details
-      .sort({ createdAt: -1 }); // Latest first
-    
+    let subs;
+
+    if (req.user.role === "admin") {
+      // 👑 Admin sees all subscriptions
+      subs = await Subscription.find()
+        .populate("student", "name email")
+        .sort({ createdAt: -1 });
+    } else if (req.user.role === "student") {
+      // 👨‍🎓 Student sees only their own subscriptions
+      subs = await Subscription.find({ student: req.user.id })
+        .populate("student", "name email")
+        .sort({ createdAt: -1 });
+    }
+
     res.status(200).json({
       message: "✅ Subscriptions fetched successfully",
       subscriptions: subs,
