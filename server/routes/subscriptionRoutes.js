@@ -7,7 +7,7 @@ const router = express.Router();
 /* ===================================================
    📋 GET ALL SUBSCRIPTIONS (Admin Only)
 =================================================== */
-router.get("/", verifyToken, roleCheck(["admin"]), async (req, res) => {
+router.get("/", verifyToken, roleCheck(["admin","student"]), async (req, res) => {
   try {
     const subs = await Subscription.find()
       .populate("student", "name email") // Populate student details
