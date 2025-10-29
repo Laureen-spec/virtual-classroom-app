@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import API from "../api/axios";
-//import NotificationBell from "../components/Notificationbell";
+import NotificationBell from "./components/NotificationBell";
 
 export default function TeacherDashboard() {
   const navigate = useNavigate();
