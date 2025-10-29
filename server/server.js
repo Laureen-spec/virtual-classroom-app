@@ -26,7 +26,7 @@ import materialRoutes from "./routes/materialRoutes.js";
 import assignmentRoutes from "./routes/assignmentRoutes.js";
 import timetableRoutes from "./routes/timetableRoutes.js";
 import liveClassRoutes from "./routes/liveClassRoutes.js";
-//import paymentAdminRoutes from "./routes/paymentAdminroutes.js";
+import paymentAdminRoutes from "./routes/paymentAdminRoutes.js";
 import creditRoutes from "./routes/creditRoutes.js";
 
 import "./config/emailConfig.js";
@@ -66,7 +66,7 @@ app.use("/api/materials", materialRoutes);
 app.use("/api/assignments", assignmentRoutes);
 app.use("/api/timetable", timetableRoutes);
 app.use("/api/live", liveClassRoutes);
-//app.use("/api/admin/payments", paymentAdminRoutes);
+app.use("/api/admin/payments", paymentAdminRoutes);
 app.use("/api/credits", creditRoutes);
 // ✅ Default route
 app.get("/", (req, res) => {
