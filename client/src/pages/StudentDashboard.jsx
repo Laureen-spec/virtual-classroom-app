@@ -29,6 +29,18 @@ export default function StudentDashboard() {
   const goToNotifications = () => { navigate("/notifications"); setIsMobileMenuOpen(false); };
   const goToChangePassword = () => { navigate("/change-password"); setIsMobileMenuOpen(false); };
 
+  // Check subscription status function - UPDATED: Better error handling
+  const checkSubscriptionStatus = async () => {
+    try {
+      const response = await API.get("/subscriptions/check");
+      // subscription can be null
+      setSubscriptionStatus(response.data.subscription || null);
+    } catch (err) {
+      console.error("Error checking subscription:", err);
+      setSubscriptionStatus(null);
+    }
+  };
+
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -52,17 +64,6 @@ export default function StudentDashboard() {
     };
     fetchData();
   }, []);
-
-  // Check subscription status function
-  const checkSubscriptionStatus = async () => {
-    try {
-      const response = await API.get("/subscriptions/check");
-      setSubscriptionStatus(response.data.subscription);
-    } catch (err) {
-      // Student doesn't have active subscription
-      setSubscriptionStatus(null);
-    }
-  };
 
   if (loading) {
     return (

@@ -122,7 +122,8 @@ router.post("/create", verifyToken, roleCheck(["student"]), async (req, res) => 
 });
 
 /* ===================================================
-   🔍 CHECK ACTIVE SUBSCRIPTION (Student Only) - UPDATED WITH CREDITS
+   🔍 CHECK ACTIVE SUBSCRIPTION (Student Only)
+   - Returns null if no active subscription instead of 403
 =================================================== */
 router.get("/check", verifyToken, roleCheck(["student"]), async (req, res) => {
   try {
@@ -135,30 +136,18 @@ router.get("/check", verifyToken, roleCheck(["student"]), async (req, res) => {
       expiryDate: { $gte: new Date() },
     });
 
+    // If no active subscription, return null instead of 403
     if (!activeSub) {
-      return res.status(403).json({
-        message: "❌ No active subscription found. Please renew.",
+      return res.status(200).json({
+        subscription: null,
+        message: "No active subscription yet. Dashboard will show limited access."
       });
     }
 
-    // Calculate weekly schedule breakdown WITH CREDIT INFO
-    const weeklySchedule = activeSub.subjects.map(sub => ({
-      subject: sub.subject,
-      frequency: sub.frequency,
-      creditsUsed: sub.creditsUsed || 0,
-      creditsRemaining: sub.frequency - (sub.creditsUsed || 0),
-      costPerWeek: sub.frequency * 40,
-      totalCost: sub.frequency * 40
-    }));
-
-    res.json({
-      message: "✅ Active weekly subscription found.",
+    // Active subscription found
+    res.status(200).json({
       subscription: activeSub,
-      weeklySchedule: weeklySchedule,
-      totalWeeklyLessons: activeSub.lessons,
-      totalWeeklyCost: activeSub.amountPaid,
-      creditsUsed: activeSub.creditsUsed || 0,
-      creditsRemaining: activeSub.creditsRemaining || activeSub.lessons
+      message: "Active subscription found."
     });
   } catch (error) {
     console.error("Error checking subscription:", error);
