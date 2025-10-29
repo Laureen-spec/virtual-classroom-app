@@ -5,6 +5,28 @@ import { verifyToken, roleCheck } from "../middleware/authMiddleware.js";
 const router = express.Router();
 
 /* ===================================================
+   📋 GET ALL SUBSCRIPTIONS (Admin Only)
+=================================================== */
+router.get("/", verifyToken, roleCheck(["admin"]), async (req, res) => {
+  try {
+    const subs = await Subscription.find()
+      .populate("student", "name email") // Populate student details
+      .sort({ createdAt: -1 }); // Latest first
+    
+    res.status(200).json({
+      message: "✅ Subscriptions fetched successfully",
+      subscriptions: subs,
+      count: subs.length
+    });
+  } catch (err) {
+    res.status(500).json({ 
+      message: "Failed to fetch subscriptions", 
+      error: err.message 
+    });
+  }
+});
+
+/* ===================================================
    💳 CREATE SUBJECT-BASED SUBSCRIPTION (Student Only) - MODIFIED
 =================================================== */
 router.post("/create", verifyToken, roleCheck(["student"]), async (req, res) => {
