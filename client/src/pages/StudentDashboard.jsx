@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import API from "../api/axios";
 import ActiveLiveClasses from "../components/ActiveLiveClasses";
-import NotificationBell from "./components/NotificationBell";
+// import NotificationBell from "./components/NotificationBell"; // COMMENTED OUT
 
 export default function StudentDashboard() {
   const navigate = useNavigate();
@@ -91,7 +91,7 @@ export default function StudentDashboard() {
 
         {/* Desktop Navigation - UPDATED: Hidden on mobile */}
         <div className="hidden sm:flex items-center gap-2 lg:gap-3 flex-wrap">
-          <NotificationBell />
+          {/* <NotificationBell /> COMMENTED OUT */}
           
           <button
             onClick={goToNotifications}
@@ -162,7 +162,7 @@ export default function StudentDashboard() {
       {isMobileMenuOpen && (
         <div className="sm:hidden bg-white rounded-xl p-4 mb-4 shadow-lg border border-green-200">
           <div className="grid grid-cols-2 gap-2">
-            <NotificationBell />
+            {/* <NotificationBell /> COMMENTED OUT */}
             <button
               onClick={goToNotifications}
               className="bg-blue-500 hover:bg-blue-600 text-white p-2 rounded-lg transition-colors flex items-center justify-center gap-1 text-xs"

@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import API from "../api/axios";
 import ActiveLiveClasses from "../components/ActiveLiveClasses";
 import AdminPayments from "../components/AdminPayments";
-import NotificationBell from "./components/NotificationBell";
+// import NotificationBell from "./components/NotificationBell"; // COMMENTED OUT
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
@@ -222,7 +222,7 @@ export default function AdminDashboard() {
 
           {/* Desktop Navigation - UPDATED: Hidden on mobile */}
           <div className="hidden sm:flex items-center space-x-2 lg:space-x-3">
-            <NotificationBell />
+            {/* <NotificationBell /> COMMENTED OUT */}
             
             {/* ADDED: Change Password Button */}
             <button
@@ -270,7 +270,7 @@ export default function AdminDashboard() {
         {isMobileMenuOpen && (
           <div className="sm:hidden bg-white/10 rounded-xl p-4 mb-4 border border-white/20">
             <div className="grid grid-cols-2 gap-2">
-              <NotificationBell />
+              {/* <NotificationBell /> COMMENTED OUT */}
               <button
                 onClick={goToChangePassword}
                 className="bg-gray-600 hover:bg-gray-700 text-white p-2 rounded-lg transition-all duration-300 flex items-center justify-center gap-1 text-xs"

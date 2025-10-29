@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import API from "../api/axios";
-import NotificationBell from "./components/NotificationBell";
+// import NotificationBell from "./components/NotificationBell"; // COMMENTED OUT: Fixing build error
 
 export default function TeacherDashboard() {
   const navigate = useNavigate();
@@ -252,7 +252,7 @@ export default function TeacherDashboard() {
 
           {/* Desktop Navigation - UPDATED: Hidden on mobile */}
           <div className="hidden sm:flex items-center space-x-2 lg:space-x-3"> {/* UPDATED: Responsive spacing */}
-            <NotificationBell />
+            {/* <NotificationBell /> COMMENTED OUT: Fixing build error */}
             <button
               onClick={goToNotifications}
               className="bg-indigo-500 hover:bg-indigo-600 text-white px-3 py-2 rounded-lg shadow-lg shadow-indigo-400/30 transition-all duration-300 flex items-center gap-2 text-sm lg:text-base" // UPDATED: Responsive text and padding
@@ -296,7 +296,7 @@ export default function TeacherDashboard() {
         {isMobileMenuOpen && (
           <div className="sm:hidden bg-white/10 rounded-xl p-4 mb-4 border border-white/20">
             <div className="grid grid-cols-2 gap-2">
-              <NotificationBell />
+              {/* <NotificationBell /> COMMENTED OUT: Fixing build error */}
               <button
                 onClick={goToNotifications}
                 className="bg-indigo-500 hover:bg-indigo-600 text-white p-2 rounded-lg transition-all duration-300 flex items-center justify-center gap-1 text-xs"
