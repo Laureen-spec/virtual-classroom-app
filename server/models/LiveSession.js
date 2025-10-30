@@ -43,6 +43,13 @@ const liveSessionSchema = new mongoose.Schema({
     leftAt: { 
       type: Date 
     },
+    lastJoinTime: { 
+      type: Date 
+    },
+    totalTimeSpent: { 
+      type: Number, 
+      default: 0 
+    },
     isHandRaised: { 
       type: Boolean, 
       default: false 
@@ -63,6 +70,10 @@ const liveSessionSchema = new mongoose.Schema({
       type: String, 
       enum: ["host", "audience"], 
       default: "audience" 
+    },
+    videoOn: { 
+      type: Boolean, 
+      default: false 
     }
   }],
   chatMessages: [{

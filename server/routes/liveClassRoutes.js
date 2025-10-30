@@ -57,7 +57,9 @@ router.post("/start", verifyToken, async (req, res) => {
         isMuted: false,
         isHandRaised: false,
         hasSpeakingPermission: true, // Teacher has speaking permission by default
-        permissionRequested: false
+        permissionRequested: false,
+        videoOn: false,
+        lastJoinTime: new Date()
       }],
       settings: {
         allowSelfUnmute: false, // Students cannot self-unmute without permission
@@ -128,10 +130,14 @@ router.post("/join/:sessionId", verifyToken, checkSubscription, async (req, res)
         isMuted,
         isHandRaised: false,
         hasSpeakingPermission,
-        permissionRequested: false
+        permissionRequested: false,
+        lastJoinTime: new Date()
       });
-      await liveSession.save();
+    } else {
+      existingParticipant.lastJoinTime = new Date();
     }
+
+    await liveSession.save();
 
     // Generate Agora token
     const token = generateAgoraToken(liveSession.channelName, 0, role);
@@ -174,6 +180,51 @@ router.post("/join/:sessionId", verifyToken, checkSubscription, async (req, res)
   } catch (error) {
     console.error("Error joining live class:", error);
     res.status(500).json({ message: "Failed to join live class", error: error.message });
+  }
+});
+
+// 🔹 Toggle Video On/Off
+router.put("/video/:sessionId", verifyToken, async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const { videoOn } = req.body; // true or false
+
+    const liveSession = await LiveSession.findById(sessionId);
+    if (!liveSession) {
+      return res.status(404).json({ message: "Live session not found" });
+    }
+
+    // Find participant
+    const participantIndex = liveSession.participants.findIndex(
+      p => p.studentId.toString() === req.user.id
+    );
+
+    if (participantIndex === -1) {
+      return res.status(404).json({ message: "You are not in this session" });
+    }
+
+    liveSession.participants[participantIndex].videoOn = videoOn;
+
+    // Add system message
+    const user = await User.findById(req.user.id);
+    const actionText = videoOn ? "turned ON video" : "turned OFF video";
+    liveSession.chatMessages.push({
+      userId: req.user.id,
+      userName: user.name,
+      message: `${user.name} ${actionText}`,
+      messageType: "system"
+    });
+
+    await liveSession.save();
+
+    res.json({
+      message: `Video ${videoOn ? "enabled" : "disabled"} successfully`,
+      videoOn
+    });
+
+  } catch (error) {
+    console.error("Error toggling video:", error);
+    res.status(500).json({ message: "Failed to toggle video", error: error.message });
   }
 });
 
@@ -666,6 +717,9 @@ router.get("/session/:sessionId", verifyToken, async (req, res) => {
         isMuted: p.isMuted,
         hasSpeakingPermission: p.hasSpeakingPermission,
         permissionRequested: p.permissionRequested,
+        videoOn: p.videoOn,
+        totalTimeSpent: p.totalTimeSpent,
+        lastJoinTime: p.lastJoinTime,
         joinedAt: p.joinedAt
       })),
       chatMessages: liveSession.chatMessages.map(m => ({
@@ -892,13 +946,24 @@ router.put("/leave/:sessionId", verifyToken, async (req, res) => {
       return res.status(404).json({ message: "Live session not found" });
     }
 
-    // Update participant's leftAt time
+    // Update participant's leftAt time and calculate duration
     const participantIndex = liveSession.participants.findIndex(
       p => p.studentId.toString() === req.user.id && !p.leftAt
     );
 
     if (participantIndex !== -1) {
-      liveSession.participants[participantIndex].leftAt = new Date();
+      const participant = liveSession.participants[participantIndex];
+      const now = new Date();
+
+      participant.leftAt = now;
+
+      // Calculate duration
+      if (participant.lastJoinTime) {
+        const duration = now - participant.lastJoinTime;
+        participant.totalTimeSpent += duration;
+        participant.lastJoinTime = null;
+      }
+
       await liveSession.save();
     }
 
