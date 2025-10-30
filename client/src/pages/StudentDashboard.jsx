@@ -314,8 +314,8 @@ export default function StudentDashboard() {
                 <div className="space-y-2">
                   <p className="font-semibold text-gray-800 text-sm sm:text-base">{c.title}</p>
                   <p className="text-xs sm:text-sm text-gray-500">
-                    {new Date(c.startTime).toLocaleString()} —{" "}
-                    {new Date(c.endTime).toLocaleString()}
+                    {new Date(c.startTime).toLocaleString("en-GB", { timeZone: "UTC" })} —{" "}
+                    {new Date(c.endTime).toLocaleString("en-GB", { timeZone: "UTC" })}
                   </p>
                   <p className="text-gray-600 text-xs sm:text-sm">Teacher: {c.teacher?.name}</p>
 
