@@ -439,7 +439,8 @@ export default function TeacherDashboard() {
                     >
                       <p className="text-base sm:text-lg font-semibold text-white">{cls.title}</p> {/* UPDATED: Responsive text */}
                       <p className="text-xs sm:text-sm text-gray-200 mt-1"> {/* UPDATED: Responsive text */}
-                        {cls.startTime} → {cls.endTime}
+                        {new Date(cls.startTime).toLocaleString("en-GB", { timeZone: "UTC" })} →{" "}
+                        {new Date(cls.endTime).toLocaleString("en-GB", { timeZone: "UTC" })}
                       </p>
                       <p className="text-gray-300 text-xs sm:text-sm mt-1"> {/* UPDATED: Responsive text */}
                         Link:{" "}
