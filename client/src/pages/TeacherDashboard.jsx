@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import API from "../api/axios";
+import axios from "axios"; // ADDED: Import axios for direct API calls
 // import NotificationBell from "./components/NotificationBell"; // COMMENTED OUT: Fixing build error
 
 export default function TeacherDashboard() {
@@ -30,6 +31,25 @@ export default function TeacherDashboard() {
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [activeTab, setActiveTab] = useState("classes");
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false); // ADDED: Mobile menu state
+
+  // 🔹 Get token from localStorage
+  const token = localStorage.getItem("token");
+
+  // 🔹 Start Live Class Function - ADDED
+  const handleStartLive = async (classId) => {
+    try {
+      const res = await axios.post(
+        "https://virtual-classroom-app-8wbh.onrender.com/api/live/start",
+        { classId },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      navigate(`/class/${res.data.sessionId}`); // Now navigate to the actual session
+    } catch (error) {
+      console.error("Failed to start class:", error.response?.data || error.message);
+      alert(error.response?.data?.message || "Error starting class");
+    }
+  };
 
   // 🔹 Logout
   const handleLogout = () => {
@@ -467,11 +487,12 @@ export default function TeacherDashboard() {
                         >
                           🗑️ Delete
                         </button>
+                        {/* UPDATED: Start Live Class Button */}
                         <button
-                          onClick={() => navigate(`/class/${cls._id}`)}
+                          onClick={() => handleStartLive(cls._id)}
                           className="bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 sm:px-3 sm:py-1 rounded-lg shadow-md transition-all text-xs sm:text-sm"
                         >
-                          🎥 Start
+                          🎥 Start Live
                         </button>
                       </div>
                     </li>
