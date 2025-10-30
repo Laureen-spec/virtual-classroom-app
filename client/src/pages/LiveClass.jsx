@@ -12,6 +12,7 @@ export default function LiveClass() {
   const [sessionInfo, setSessionInfo] = useState(null);
   const [participantInfo, setParticipantInfo] = useState(null);
   const [isMuted, setIsMuted] = useState(true);
+  const [isVideoOn, setIsVideoOn] = useState(true); // ADDED: Video state
   const [isHandRaised, setIsHandRaised] = useState(false);
   const [hasSpeakingPermission, setHasSpeakingPermission] = useState(false);
   const [chatMessages, setChatMessages] = useState([]);
@@ -23,6 +24,40 @@ export default function LiveClass() {
   const appId = import.meta.env.VITE_AGORA_APP_ID;
   const client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
   const chatContainerRef = useRef(null);
+
+  // Toggle Video On/Off - ADDED
+  const toggleVideo = async () => {
+    try {
+      if (!localTracks.video) return;
+
+      const newVideoState = !isVideoOn;
+
+      // Enable/disable camera locally
+      localTracks.video.setEnabled(newVideoState);
+      setIsVideoOn(newVideoState);
+
+      // Update backend
+      await API.put(`/live/video/${sessionId}`, { videoOn: newVideoState });
+
+    } catch (err) {
+      console.error("Toggle video failed:", err);
+      alert(err.response?.data?.message || "Failed to toggle video");
+    }
+  };
+
+  // End Live Class - ADDED (Teacher only)
+  const endLiveClass = async () => {
+    if (!window.confirm("Are you sure you want to end this live class for everyone?")) return;
+
+    try {
+      await API.put(`/live/end/${sessionId}`);
+      alert("Live class ended successfully.");
+      navigate("/dashboard"); // or wherever you want to redirect
+    } catch (err) {
+      console.error("End live class failed:", err);
+      alert(err.response?.data?.message || "Failed to end class");
+    }
+  };
 
   // Fetch session info and join class
   const joinClass = async () => {
@@ -86,7 +121,14 @@ export default function LiveClass() {
       if (!sessionId) return;
       try {
         const response = await API.get(`/live/session/${sessionId}`);
-        const { participants, chatMessages, permissionRequests } = response.data;
+        const { participants, chatMessages, permissionRequests, isActive } = response.data; // UPDATED: Added isActive
+
+        // UPDATED: Check if class has ended
+        if (!isActive) {
+          alert("Class has ended.");
+          navigate("/dashboard");
+          return;
+        }
         
         setParticipants(participants);
         setChatMessages(chatMessages);
@@ -274,6 +316,19 @@ export default function LiveClass() {
         </div>
         
         <div className="flex items-center space-x-4">
+          {/* Video Controls - ADDED */}
+          <button
+            onClick={toggleVideo}
+            className={`p-3 rounded-full ${
+              isVideoOn 
+                ? "bg-green-600 hover:bg-green-700" 
+                : "bg-red-600 hover:bg-red-700"
+            } transition-all`}
+            title={isVideoOn ? "Turn Off Video" : "Turn On Video"}
+          >
+            {isVideoOn ? "📹" : "📷"}
+          </button>
+
           {/* Audio Controls */}
           <button
             onClick={toggleMute}
@@ -328,7 +383,7 @@ export default function LiveClass() {
             <div className="bg-black rounded-lg overflow-hidden relative">
               <div id="local-player" className="w-full h-48"></div>
               <div className="absolute bottom-2 left-2 bg-black bg-opacity-50 px-2 py-1 rounded text-sm">
-                You {isMuted && "🔇"}
+                You {isMuted && "🔇"} {!isVideoOn && "📷"}
               </div>
             </div>
 
@@ -361,6 +416,13 @@ export default function LiveClass() {
                   className="bg-green-600 hover:bg-green-700 px-3 py-2 rounded text-sm"
                 >
                   Unmute All
+                </button>
+                {/* End Live Class - ADDED */}
+                <button
+                  onClick={endLiveClass}
+                  className="bg-orange-600 hover:bg-orange-700 px-3 py-2 rounded text-sm"
+                >
+                  🛑 End Live Class
                 </button>
               </div>
 
