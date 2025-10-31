@@ -103,7 +103,15 @@ router.post("/join/:sessionId", verifyToken, checkSubscription, async (req, res)
     }
 
     if (!liveSession.isActive) {
-      return res.status(400).json({ message: "This live session has ended" });
+      console.log(`Session ${sessionId} is not active. isActive: ${liveSession.isActive}`);
+      return res.status(400).json({ 
+        message: "This live session has ended",
+        details: {
+          isActive: liveSession.isActive,
+          endTime: liveSession.endTime,
+          sessionId: liveSession._id
+        }
+      });
     }
 
     // Check if user is already a participant

@@ -129,23 +129,9 @@ export default function LiveClass() {
         const response = await API.get(`/live/session/${sessionId}`);
         const { participants, chatMessages, permissionRequests, isActive } = response.data;
 
-        // UPDATED: Safe version - only redirect students when class ends
+        // Only check if class is active - don't auto-redirect
         if (!isActive) {
-          const currentParticipant = participants.find(p => p.studentId === localStorage.getItem("userId"));
-          const isCurrentUserTeacher = currentParticipant?.role === "host" || currentParticipant?.role === "admin";
-          
-          if (!isCurrentUserTeacher) {
-            alert("Class has ended.");
-            // Redirect based on user role
-            const userRole = localStorage.getItem("role");
-            if (userRole === "teacher") {
-              navigate("/teacher");
-            } else if (userRole === "admin") {
-              navigate("/admin");
-            } else {
-              navigate("/student");
-            }
-          }
+          console.log("Class has ended");
           return;
         }
         
@@ -301,11 +287,15 @@ export default function LiveClass() {
     }
   }, [chatMessages]);
 
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
       localTracks.audio?.close();
       localTracks.video?.close();
       client.leave();
+      // Clear any polling intervals
+      const intervals = window.liveClassIntervals || [];
+      intervals.forEach(clearInterval);
     };
   }, []);
 
