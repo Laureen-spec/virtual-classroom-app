@@ -25,23 +25,18 @@ export default function LiveClass() {
   const client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
   const chatContainerRef = useRef(null);
 
-  // Toggle Video On/Off - ADDED
+  // Toggle Video On/Off - UPDATED
   const toggleVideo = async () => {
     try {
       if (!localTracks.video) return;
 
       const newVideoState = !isVideoOn;
 
-      // Enable/disable camera locally
-      localTracks.video.setEnabled(newVideoState);
+      // Just toggle camera locally
+      await localTracks.video.setEnabled(newVideoState);
       setIsVideoOn(newVideoState);
-
-      // Update backend
-      await API.put(`/live/video/${sessionId}`, { videoOn: newVideoState });
-
     } catch (err) {
       console.error("Toggle video failed:", err);
-      alert(err.response?.data?.message || "Failed to toggle video");
     }
   };
 
@@ -70,7 +65,7 @@ export default function LiveClass() {
       setParticipantInfo(participantInfo);
       setIsMuted(participantInfo.isMuted);
       setHasSpeakingPermission(participantInfo.hasSpeakingPermission);
-      setIsTeacher(session.isHost);
+      setIsTeacher(participantInfo.role === "teacher" || participantInfo.role === "admin");
 
       // Join Agora channel
       const uid = await client.join(appId, session.channelName, token, null);
