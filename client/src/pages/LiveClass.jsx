@@ -47,7 +47,15 @@ export default function LiveClass() {
     try {
       await API.put(`/live/end/${sessionId}`);
       alert("Live class ended successfully.");
-      navigate("/dashboard"); // or wherever you want to redirect
+      // Redirect teacher to their dashboard after ending class
+      const userRole = localStorage.getItem("role");
+      if (userRole === "teacher") {
+        navigate("/teacher");
+      } else if (userRole === "admin") {
+        navigate("/admin");
+      } else {
+        navigate("/student");
+      }
     } catch (err) {
       console.error("End live class failed:", err);
       alert(err.response?.data?.message || "Failed to end class");
@@ -123,9 +131,20 @@ export default function LiveClass() {
 
         // UPDATED: Safe version - only redirect students when class ends
         if (!isActive) {
-          if (!isTeacher) {
+          const currentParticipant = participants.find(p => p.studentId === localStorage.getItem("userId"));
+          const isCurrentUserTeacher = currentParticipant?.role === "host" || currentParticipant?.role === "admin";
+          
+          if (!isCurrentUserTeacher) {
             alert("Class has ended.");
-            navigate("/dashboard");
+            // Redirect based on user role
+            const userRole = localStorage.getItem("role");
+            if (userRole === "teacher") {
+              navigate("/teacher");
+            } else if (userRole === "admin") {
+              navigate("/admin");
+            } else {
+              navigate("/student");
+            }
           }
           return;
         }
