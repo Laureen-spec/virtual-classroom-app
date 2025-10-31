@@ -49,7 +49,10 @@ router.post("/stkpush", verifyToken, roleCheck(["student"]), async (req, res) =>
       "Business": 3,
       "Agriculture": 3,
       "CRE": 3,
-      "Physics": 2
+      "Physics": 2,
+      // ADD THESE TWO NEW SUBJECTS:
+      "Geography": 3,
+      "History": 3
     };
 
     // 🧮 Validate subject frequencies and calculate total cost

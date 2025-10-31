@@ -60,7 +60,10 @@ router.post("/create", verifyToken, roleCheck(["student"]), async (req, res) => 
       "Business": 3,
       "Agriculture": 3,
       "CRE": 3,
-      "Physics": 2
+      "Physics": 2,
+      // ADD THESE TWO NEW SUBJECTS:
+      "Geography": 3,
+      "History": 3
     };
 
     // Validate each subject has the correct fixed frequency
@@ -170,6 +173,9 @@ router.get("/pricing", verifyToken, roleCheck(["student"]), async (req, res) => 
       { subject: "Agriculture", frequency: 3, costPerLesson: 40, weeklyCost: 120 },
       { subject: "CRE", frequency: 3, costPerLesson: 40, weeklyCost: 120 },
       { subject: "Physics", frequency: 2, costPerLesson: 40, weeklyCost: 80 },
+      // ADD THESE TWO NEW SUBJECTS:
+      { subject: "Geography", frequency: 3, costPerLesson: 40, weeklyCost: 120 },
+      { subject: "History", frequency: 3, costPerLesson: 40, weeklyCost: 120 },
     ];
 
     res.json({

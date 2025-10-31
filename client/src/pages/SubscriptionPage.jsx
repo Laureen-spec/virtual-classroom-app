@@ -19,6 +19,9 @@ export default function SubscriptionPage() {
     { name: "Agriculture", frequency: 3 },
     { name: "CRE", frequency: 3 },
     { name: "Physics", frequency: 2 },
+    // ADD THESE TWO NEW SUBJECTS:
+    { name: "Geography", frequency: 3 },
+    { name: "History", frequency: 3 },
   ];
 
   // 💰 Calculate total cost based on selected subjects
