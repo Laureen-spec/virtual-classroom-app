@@ -74,6 +74,11 @@ const liveSessionSchema = new mongoose.Schema({
     videoOn: { 
       type: Boolean, 
       default: false 
+    },
+    // ADDED: Screen sharing field
+    isScreenSharing: {
+      type: Boolean,
+      default: false
     }
   }],
   chatMessages: [{

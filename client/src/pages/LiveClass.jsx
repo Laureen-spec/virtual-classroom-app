@@ -21,9 +21,103 @@ export default function LiveClass() {
   const [isTeacher, setIsTeacher] = useState(false);
   const [pendingRequests, setPendingRequests] = useState([]);
 
+  // ADD THIS: Screen sharing state variables
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
+  const [screenShareTrack, setScreenShareTrack] = useState(null);
+
   const appId = import.meta.env.VITE_AGORA_APP_ID;
   const client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
   const chatContainerRef = useRef(null);
+
+  // ADD THESE SCREEN SHARING FUNCTIONS:
+
+  // Start Screen Sharing
+  const startScreenShare = async () => {
+    try {
+      if (!isTeacher) {
+        alert("Only teachers can share screen");
+        return;
+      }
+
+      // Create screen share track
+      const screenTrack = await AgoraRTC.createScreenVideoTrack({
+        encoderConfig: "1080p_1",
+      }, "auto");
+
+      // Unpublish camera video first
+      if (localTracks.video) {
+        await client.unpublish(localTracks.video);
+      }
+
+      // Publish screen share track
+      await client.publish(screenTrack);
+      
+      // Play screen share in local player
+      if (Array.isArray(screenTrack)) {
+        screenTrack[0].play("local-player");
+        setScreenShareTrack(screenTrack[0]);
+      } else {
+        screenTrack.play("local-player");
+        setScreenShareTrack(screenTrack);
+      }
+
+      // Update backend
+      await API.post(`/live/screen-share/start/${sessionId}`);
+      setIsScreenSharing(true);
+      
+      console.log("Screen sharing started successfully");
+
+    } catch (err) {
+      console.error("Start screen share failed:", err);
+      
+      // If user cancels screen share picker, republish camera
+      if (err.message?.includes('PERMISSION_DENIED') || err.name === 'NotAllowedError') {
+        if (localTracks.video) {
+          await client.publish(localTracks.video);
+          localTracks.video.play("local-player");
+        }
+      } else {
+        alert("Failed to start screen sharing: " + (err.message || "Unknown error"));
+      }
+    }
+  };
+
+  // Stop Screen Sharing
+  const stopScreenShare = async () => {
+    try {
+      if (screenShareTrack) {
+        // Unpublish screen share track
+        await client.unpublish(screenShareTrack);
+        screenShareTrack.close();
+        setScreenShareTrack(null);
+      }
+
+      // Republish camera video
+      if (localTracks.video) {
+        await client.publish(localTracks.video);
+        localTracks.video.play("local-player");
+      }
+
+      // Update backend
+      await API.post(`/live/screen-share/stop/${sessionId}`);
+      setIsScreenSharing(false);
+      
+      console.log("Screen sharing stopped");
+
+    } catch (err) {
+      console.error("Stop screen share failed:", err);
+      alert("Failed to stop screen sharing");
+    }
+  };
+
+  // Toggle Screen Sharing
+  const toggleScreenShare = async () => {
+    if (isScreenSharing) {
+      await stopScreenShare();
+    } else {
+      await startScreenShare();
+    }
+  };
 
   // Toggle Video On/Off - UPDATED
   const toggleVideo = async () => {
@@ -77,6 +171,8 @@ export default function LiveClass() {
       setIsTeacher(participantInfo.role === "host" || participantInfo.role === "admin");
       // FIX: Set initial video state from participantInfo
       setIsVideoOn(participantInfo.videoOn || true);
+      // ADD THIS: Set initial screen sharing state
+      setIsScreenSharing(participantInfo.isScreenSharing || false);
 
       // Join Agora channel
       const uid = await client.join(appId, session.channelName, token, null);
@@ -147,6 +243,10 @@ export default function LiveClass() {
           setIsMuted(currentParticipant.isMuted);
           setHasSpeakingPermission(currentParticipant.hasSpeakingPermission);
           setIsHandRaised(currentParticipant.isHandRaised);
+          // ADD THIS: Update screen sharing state
+          if (isTeacher) {
+            setIsScreenSharing(currentParticipant.isScreenSharing || false);
+          }
         }
 
       } catch (err) {
@@ -269,6 +369,11 @@ export default function LiveClass() {
   // Leave class
   const leaveClass = async () => {
     try {
+      // Stop screen sharing if active
+      if (isScreenSharing) {
+        await stopScreenShare();
+      }
+      
       localTracks.audio?.close();
       localTracks.video?.close();
       await client.leave();
@@ -290,6 +395,11 @@ export default function LiveClass() {
   // Cleanup on unmount
   useEffect(() => {
     return () => {
+      // Stop screen sharing if active
+      if (screenShareTrack) {
+        screenShareTrack.close();
+      }
+      
       localTracks.audio?.close();
       localTracks.video?.close();
       client.leave();
@@ -325,6 +435,21 @@ export default function LiveClass() {
         </div>
         
         <div className="flex items-center space-x-4">
+          {/* ADD THIS: Screen Share Button for Teachers */}
+          {isTeacher && (
+            <button
+              onClick={toggleScreenShare}
+              className={`p-3 rounded-full ${
+                isScreenSharing 
+                  ? "bg-purple-600 hover:bg-purple-700" 
+                  : "bg-gray-600 hover:bg-gray-700"
+              } transition-all`}
+              title={isScreenSharing ? "Stop Screen Share" : "Start Screen Share"}
+            >
+              {isScreenSharing ? "🖥️●" : "🖥️"}
+            </button>
+          )}
+
           {/* Video Controls - ADDED */}
           <button
             onClick={toggleVideo}
@@ -388,12 +513,17 @@ export default function LiveClass() {
         {/* Video Grid - Left Side */}
         <div className="flex-1 p-4">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {/* Local Video */}
+            {/* UPDATE THIS: Local Video with Screen Sharing Indicator */}
             <div className="bg-black rounded-lg overflow-hidden relative">
               <div id="local-player" className="w-full h-48"></div>
               <div className="absolute bottom-2 left-2 bg-black bg-opacity-50 px-2 py-1 rounded text-sm">
-                You {isMuted && "🔇"} {!isVideoOn && "📷"}
+                You {isMuted && "🔇"} {!isVideoOn && "📷"} {isScreenSharing && "🖥️"}
               </div>
+              {isScreenSharing && (
+                <div className="absolute top-2 left-2 bg-purple-600 px-2 py-1 rounded text-xs">
+                  Screen Sharing
+                </div>
+              )}
             </div>
 
             {/* Remote Videos */}
@@ -412,6 +542,23 @@ export default function LiveClass() {
             <div className="mt-6 bg-gray-800 p-4 rounded-lg">
               <h3 className="text-lg font-semibold mb-3">Teacher Controls</h3>
               
+              {/* ADD THIS: Screen Sharing Status */}
+              <div className="mb-4 p-3 bg-purple-600 bg-opacity-20 rounded">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold">Screen Sharing: {isScreenSharing ? "ACTIVE" : "INACTIVE"}</span>
+                  <button
+                    onClick={toggleScreenShare}
+                    className={`px-3 py-1 rounded text-sm ${
+                      isScreenSharing 
+                        ? "bg-red-600 hover:bg-red-700" 
+                        : "bg-purple-600 hover:bg-purple-700"
+                    }`}
+                  >
+                    {isScreenSharing ? "Stop Sharing" : "Start Sharing"}
+                  </button>
+                </div>
+              </div>
+
               {/* Quick Actions */}
               <div className="flex space-x-2 mb-4">
                 <button

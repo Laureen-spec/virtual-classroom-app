@@ -984,4 +984,108 @@ router.put("/leave/:sessionId", verifyToken, async (req, res) => {
   }
 });
 
+// 🔹 Start Screen Sharing (Teacher only) - ADD THIS NEW ROUTE
+router.post("/screen-share/start/:sessionId", verifyToken, async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+
+    const liveSession = await LiveSession.findById(sessionId);
+    if (!liveSession) {
+      return res.status(404).json({ message: "Live session not found" });
+    }
+
+    // Check if user is teacher and owns the session
+    if (liveSession.teacherId.toString() !== req.user.id) {
+      return res.status(403).json({ message: "Only the teacher can start screen sharing" });
+    }
+
+    // Find teacher participant
+    const teacherParticipantIndex = liveSession.participants.findIndex(
+      p => p.studentId.toString() === req.user.id
+    );
+
+    if (teacherParticipantIndex === -1) {
+      return res.status(404).json({ message: "Teacher not found in session" });
+    }
+
+    // Update screen sharing status
+    liveSession.participants[teacherParticipantIndex].isScreenSharing = true;
+
+    // Add system message
+    const teacher = await User.findById(req.user.id);
+    liveSession.chatMessages.push({
+      userId: req.user.id,
+      userName: teacher.name,
+      message: `${teacher.name} started screen sharing`,
+      messageType: "system",
+      metadata: {
+        action: "screen_share_started"
+      }
+    });
+
+    await liveSession.save();
+
+    res.json({
+      message: "Screen sharing started",
+      isScreenSharing: true
+    });
+
+  } catch (error) {
+    console.error("Error starting screen sharing:", error);
+    res.status(500).json({ message: "Failed to start screen sharing", error: error.message });
+  }
+});
+
+// 🔹 Stop Screen Sharing (Teacher only) - ADD THIS NEW ROUTE
+router.post("/screen-share/stop/:sessionId", verifyToken, async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+
+    const liveSession = await LiveSession.findById(sessionId);
+    if (!liveSession) {
+      return res.status(404).json({ message: "Live session not found" });
+    }
+
+    // Check if user is teacher and owns the session
+    if (liveSession.teacherId.toString() !== req.user.id) {
+      return res.status(403).json({ message: "Only the teacher can stop screen sharing" });
+    }
+
+    // Find teacher participant
+    const teacherParticipantIndex = liveSession.participants.findIndex(
+      p => p.studentId.toString() === req.user.id
+    );
+
+    if (teacherParticipantIndex === -1) {
+      return res.status(404).json({ message: "Teacher not found in session" });
+    }
+
+    // Update screen sharing status
+    liveSession.participants[teacherParticipantIndex].isScreenSharing = false;
+
+    // Add system message
+    const teacher = await User.findById(req.user.id);
+    liveSession.chatMessages.push({
+      userId: req.user.id,
+      userName: teacher.name,
+      message: `${teacher.name} stopped screen sharing`,
+      messageType: "system",
+      metadata: {
+        action: "screen_share_stopped"
+      }
+    });
+
+    await liveSession.save();
+
+    res.json({
+      message: "Screen sharing stopped",
+      isScreenSharing: false
+    });
+
+  } catch (error) {
+    console.error("Error stopping screen sharing:", error);
+    res.status(500).json({ message: "Failed to stop screen sharing", error: error.message });
+  }
+});
+
 export default router;
