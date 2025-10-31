@@ -65,7 +65,10 @@ export default function LiveClass() {
       setParticipantInfo(participantInfo);
       setIsMuted(participantInfo.isMuted);
       setHasSpeakingPermission(participantInfo.hasSpeakingPermission);
-      setIsTeacher(participantInfo.role === "teacher" || participantInfo.role === "admin");
+      // FIX: Changed from "teacher" to "host" for role detection
+      setIsTeacher(participantInfo.role === "host" || participantInfo.role === "admin");
+      // FIX: Set initial video state from participantInfo
+      setIsVideoOn(participantInfo.videoOn || true);
 
       // Join Agora channel
       const uid = await client.join(appId, session.channelName, token, null);

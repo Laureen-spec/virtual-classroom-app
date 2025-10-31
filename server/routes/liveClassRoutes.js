@@ -160,7 +160,8 @@ router.post("/join/:sessionId", verifyToken, checkSubscription, async (req, res)
       participantInfo: {
         isMuted,
         hasSpeakingPermission,
-        canSelfUnmute: hasSpeakingPermission && !isMuted
+        canSelfUnmute: hasSpeakingPermission && !isMuted,
+        role: req.user.role === "teacher" ? "host" : "audience" // ADDED: Include role in response
       },
       token,
       appId: process.env.VITE_AGORA_APP_ID
