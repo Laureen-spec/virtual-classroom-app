@@ -101,7 +101,7 @@ export default function TimetablePage() {
   }
 
   // 📅 Group lessons by day
-  const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
+  const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday" ,"Saturday"];
   const grouped = days.map((day) => ({
     day,
     lessons: timetable.filter((t) => t.day === day),
