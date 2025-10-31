@@ -121,12 +121,14 @@ export default function LiveClass() {
       if (!sessionId) return;
       try {
         const response = await API.get(`/live/session/${sessionId}`);
-        const { participants, chatMessages, permissionRequests, isActive } = response.data; // UPDATED: Added isActive
+        const { participants, chatMessages, permissionRequests, isActive } = response.data;
 
-        // UPDATED: Check if class has ended
+        // UPDATED: Safe version - only redirect students when class ends
         if (!isActive) {
-          alert("Class has ended.");
-          navigate("/dashboard");
+          if (!isTeacher) {
+            alert("Class has ended.");
+            navigate("/dashboard");
+          }
           return;
         }
         
