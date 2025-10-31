@@ -239,7 +239,7 @@ export default function TeacherDashboard() {
   }
 
   // 📅 Group lessons by day for timetable display
-  const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
+  const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"," Saturday"];
   const grouped = days.map((day) => ({
     day,
     lessons: timetable.filter((t) => t.day === day),
