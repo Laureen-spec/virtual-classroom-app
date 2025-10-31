@@ -11,6 +11,11 @@ const liveSessionSchema = new mongoose.Schema({
     ref: "User", 
     required: true 
   },
+  // ADD THIS NEW FIELD:
+  allowTeacherRejoin: {
+    type: Boolean,
+    default: true  // Allow teachers to rejoin by default
+  },
   channelName: { 
     type: String, 
     required: true, 

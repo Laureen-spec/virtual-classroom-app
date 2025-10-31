@@ -174,6 +174,12 @@ export default function LiveClass() {
       // ADD THIS: Set initial screen sharing state
       setIsScreenSharing(participantInfo.isScreenSharing || false);
 
+      // ADD THIS: Check if teacher is rejoining
+      if (isTeacher && participantInfo.role === "host") {
+        console.log("Teacher rejoining live session");
+        // You can add specific logic for teacher rejoins here
+      }
+
       // Join Agora channel
       const uid = await client.join(appId, session.channelName, token, null);
 

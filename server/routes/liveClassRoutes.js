@@ -88,6 +88,51 @@ router.post("/start", verifyToken, async (req, res) => {
   }
 });
 
+// 🔹 Check if teacher can rejoin their live session - ADD THIS NEW ROUTE
+router.get("/teacher-session/:classId", verifyToken, async (req, res) => {
+  try {
+    const { classId } = req.params;
+
+    // Check if user is a teacher
+    if (req.user.role !== "teacher") {
+      return res.status(403).json({ message: "Only teachers can check their sessions" });
+    }
+
+    // Find active session for this class owned by the teacher
+    const activeSession = await LiveSession.findOne({
+      classId,
+      teacherId: req.user.id,
+      isActive: true
+    })
+    .populate("classId", "title description")
+    .populate("teacherId", "name");
+
+    if (!activeSession) {
+      return res.status(404).json({ 
+        message: "No active session found for this class",
+        hasActiveSession: false
+      });
+    }
+
+    res.json({
+      message: "Active session found",
+      hasActiveSession: true,
+      session: {
+        id: activeSession._id,
+        title: activeSession.sessionTitle,
+        channelName: activeSession.channelName,
+        startTime: activeSession.startTime,
+        participantCount: activeSession.participants.length,
+        allowTeacherRejoin: activeSession.allowTeacherRejoin
+      }
+    });
+
+  } catch (error) {
+    console.error("Error checking teacher session:", error);
+    res.status(500).json({ message: "Failed to check teacher session", error: error.message });
+  }
+});
+
 // 🔹 Join a live class (Student/Teacher) - WITH SUBSCRIPTION CHECK
 router.post("/join/:sessionId", verifyToken, checkSubscription, async (req, res) => {
   try {
@@ -128,6 +173,21 @@ router.post("/join/:sessionId", verifyToken, checkSubscription, async (req, res)
       role = RtcRole.PUBLISHER;
       isMuted = false;
       hasSpeakingPermission = true;
+      
+      // ADD THIS: Reset leftAt time when teacher rejoins
+      if (existingParticipant && existingParticipant.leftAt) {
+        existingParticipant.leftAt = null;
+        existingParticipant.lastJoinTime = new Date();
+        
+        // Add system message for teacher rejoin
+        const teacher = await User.findById(req.user.id);
+        liveSession.chatMessages.push({
+          userId: req.user.id,
+          userName: teacher.name,
+          message: `${teacher.name} rejoined the session`,
+          messageType: "system"
+        });
+      }
     }
 
     // Add user to participants if not already added

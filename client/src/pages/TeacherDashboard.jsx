@@ -32,6 +32,9 @@ export default function TeacherDashboard() {
   const [activeTab, setActiveTab] = useState("classes");
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false); // ADDED: Mobile menu state
 
+  // ADD THIS: State variable for active sessions
+  const [activeSessions, setActiveSessions] = useState({});
+
   // 🔹 Get token from localStorage
   const token = localStorage.getItem("token");
 
@@ -50,6 +53,37 @@ export default function TeacherDashboard() {
       alert(error.response?.data?.message || "Error starting class");
     }
   };
+
+  // ADD THIS: Function to check for active teacher sessions
+  const checkActiveSessions = async () => {
+    try {
+      const sessionsMap = {};
+      
+      // Check each class for active sessions
+      for (const cls of classes) {
+        try {
+          const response = await API.get(`/live/teacher-session/${cls._id}`);
+          if (response.data.hasActiveSession) {
+            sessionsMap[cls._id] = response.data.session;
+          }
+        } catch (err) {
+          // No active session for this class, continue
+          console.log(`No active session for class ${cls._id}`);
+        }
+      }
+      
+      setActiveSessions(sessionsMap);
+    } catch (err) {
+      console.error("Error checking active sessions:", err);
+    }
+  };
+
+  // CALL THIS: When classes are loaded
+  useEffect(() => {
+    if (classes.length > 0) {
+      checkActiveSessions();
+    }
+  }, [classes]);
 
   // 🔹 Logout
   const handleLogout = () => {
@@ -457,11 +491,26 @@ export default function TeacherDashboard() {
                       key={cls._id}
                       className="p-3 sm:p-4 rounded-xl bg-white/20 border border-white/20 hover:bg-white/30 transition-all duration-300" // UPDATED: Responsive padding
                     >
-                      <p className="text-base sm:text-lg font-semibold text-white">{cls.title}</p> {/* UPDATED: Responsive text */}
-                      <p className="text-xs sm:text-sm text-gray-200 mt-1"> {/* UPDATED: Responsive text */}
-                        {new Date(cls.startTime).toLocaleString("en-GB", { timeZone: "UTC" })} →{" "}
-                        {new Date(cls.endTime).toLocaleString("en-GB", { timeZone: "UTC" })}
-                      </p>
+                      <div className="flex justify-between items-start">
+                        <div className="flex-1">
+                          <p className="text-base sm:text-lg font-semibold text-white">{cls.title}</p> {/* UPDATED: Responsive text */}
+                          <p className="text-xs sm:text-sm text-gray-200 mt-1"> {/* UPDATED: Responsive text */}
+                            {new Date(cls.startTime).toLocaleString("en-GB", { timeZone: "UTC" })} →{" "}
+                            {new Date(cls.endTime).toLocaleString("en-GB", { timeZone: "UTC" })}
+                          </p>
+                          
+                          {/* ADD THIS: Active session indicator */}
+                          {activeSessions[cls._id] && (
+                            <div className="flex items-center mt-1">
+                              <span className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></span>
+                              <span className="text-xs text-green-300 font-medium">
+                                🔴 LIVE - {activeSessions[cls._id].participantCount} participants
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      
                       <p className="text-gray-300 text-xs sm:text-sm mt-1"> {/* UPDATED: Responsive text */}
                         Link:{" "}
                         <a
@@ -487,13 +536,27 @@ export default function TeacherDashboard() {
                         >
                           🗑️ Delete
                         </button>
-                        {/* UPDATED: Start Live Class Button */}
-                        <button
-                          onClick={() => handleStartLive(cls._id)}
-                          className="bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 sm:px-3 sm:py-1 rounded-lg shadow-md transition-all text-xs sm:text-sm"
-                        >
-                          🎥 Start Live
-                        </button>
+                        
+                        {/* ADD THIS: Rejoin Live Class Button */}
+                        {activeSessions[cls._id] && (
+                          <button
+                            onClick={() => navigate(`/class/${activeSessions[cls._id].id}`)}
+                            className="bg-green-600 hover:bg-green-700 text-white px-2 py-1 sm:px-3 sm:py-1 rounded-lg shadow-md transition-all text-xs sm:text-sm"
+                            title={`Rejoin live session with ${activeSessions[cls._id].participantCount} participants`}
+                          >
+                            🔄 Rejoin Live
+                          </button>
+                        )}
+                        
+                        {/* UPDATED: Start Live Class Button - Only show if no active session */}
+                        {!activeSessions[cls._id] && (
+                          <button
+                            onClick={() => handleStartLive(cls._id)}
+                            className="bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 sm:px-3 sm:py-1 rounded-lg shadow-md transition-all text-xs sm:text-sm"
+                          >
+                            🎥 Start Live
+                          </button>
+                        )}
                       </div>
                     </li>
                   ))}
