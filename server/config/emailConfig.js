@@ -13,7 +13,7 @@ const createTransporter = () => {
     
     console.log("✅ Using Gmail transporter with:", process.env.EMAIL_USER);
     
-    return nodemailer.createTransporter({
+    return nodemailer.createTransport({
       service: "gmail",
       auth: {
         user: process.env.EMAIL_USER,
