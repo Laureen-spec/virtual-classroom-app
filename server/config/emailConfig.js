@@ -1,9 +1,18 @@
 import nodemailer from "nodemailer";
 
+console.log("🔧 Email Config - Checking credentials...");
+console.log("EMAIL_USER exists:", !!process.env.EMAIL_USER);
+console.log("EMAIL_PASS exists:", !!process.env.EMAIL_PASS);
+
 // Create transporter based on environment
 const createTransporter = () => {
-  // If we have email credentials, use real email service
-  if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
+  // Check if we have valid email credentials
+  if (process.env.EMAIL_USER && process.env.EMAIL_PASS && 
+      process.env.EMAIL_USER !== 'yourgmail@gmail.com' && 
+      process.env.EMAIL_PASS !== 'your_app_password') {
+    
+    console.log("✅ Using Gmail transporter with:", process.env.EMAIL_USER);
+    
     return nodemailer.createTransporter({
       service: "gmail",
       auth: {
@@ -12,8 +21,11 @@ const createTransporter = () => {
       },
     });
   } else {
-    // Fallback to console logging for development
-    console.log("⚠️ Email credentials not found. Using console transport.");
+    // Fallback to console logging
+    console.log("⚠️ Email credentials not found or using defaults. Using console transport.");
+    console.log("Current EMAIL_USER:", process.env.EMAIL_USER);
+    console.log("Current EMAIL_PASS:", process.env.EMAIL_PASS ? "***" + process.env.EMAIL_PASS.slice(-4) : "undefined");
+    
     return {
       sendMail: async (mailOptions) => {
         console.log("📧 Email would be sent to:", mailOptions.to);
