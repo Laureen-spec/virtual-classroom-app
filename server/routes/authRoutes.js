@@ -4,7 +4,7 @@ import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import dotenv from "dotenv";
 import User from "../models/User.js";
-import transporter from "../config/emailConfig.js";
+import emailService from "../config/emailConfig.js"; // UPDATED: Changed from transporter to emailService
 import { verifyToken, roleCheck } from "../middleware/authMiddleware.js";
 
 dotenv.config();
@@ -231,7 +231,7 @@ router.post("/forgot-password", async (req, res) => {
 
     // Email content
     const mailOptions = {
-      from: process.env.EMAIL_USER || "noreply@virtualclassroom.com",
+      from: process.env.EMAIL_FROM || "noreply@virtualclassroom.com", // UPDATED: Use EMAIL_FROM
       to: user.email,
       subject: "🔐 Password Reset Request - Virtual Classroom",
       html: `
@@ -272,8 +272,8 @@ router.post("/forgot-password", async (req, res) => {
       `,
     };
 
-    // Send email
-    await transporter.sendMail(mailOptions);
+    // UPDATED: Send email using emailService instead of transporter
+    await emailService.sendMail(mailOptions);
 
     console.log(`✅ Password reset email sent to: ${user.email}`);
     console.log(`⏰ Token expires at: ${new Date(user.resetPasswordExpires).toLocaleString()}`);

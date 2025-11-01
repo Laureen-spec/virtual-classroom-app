@@ -1,43 +1,53 @@
-import nodemailer from "nodemailer";
+import sgMail from '@sendgrid/mail';
 
-console.log("🔧 Email Config - Checking credentials...");
-console.log("EMAIL_USER exists:", !!process.env.EMAIL_USER);
-console.log("EMAIL_PASS exists:", !!process.env.EMAIL_PASS);
+console.log("🔧 Email Config - Checking SendGrid credentials...");
+console.log("SENDGRID_API_KEY exists:", !!process.env.SENDGRID_API_KEY);
 
-// Create transporter based on environment
-const createTransporter = () => {
-  // Check if we have valid email credentials
-  if (process.env.EMAIL_USER && process.env.EMAIL_PASS && 
-      process.env.EMAIL_USER !== 'yourgmail@gmail.com' && 
-      process.env.EMAIL_PASS !== 'your_app_password') {
-    
-    console.log("✅ Using Gmail transporter with:", process.env.EMAIL_USER);
-    
-    return nodemailer.createTransport({
-      service: "gmail",
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-      },
-    });
-  } else {
-    // Fallback to console logging
-    console.log("⚠️ Email credentials not found or using defaults. Using console transport.");
-    console.log("Current EMAIL_USER:", process.env.EMAIL_USER);
-    console.log("Current EMAIL_PASS:", process.env.EMAIL_PASS ? "***" + process.env.EMAIL_PASS.slice(-4) : "undefined");
-    
-    return {
-      sendMail: async (mailOptions) => {
-        console.log("📧 Email would be sent to:", mailOptions.to);
-        console.log("📧 Subject:", mailOptions.subject);
-        console.log("🔗 Reset Link:", mailOptions.html.match(/http[^"]*/)?.[0] || "Link not found");
-        console.log("---");
-        return { messageId: "console-log" };
-      }
+// Configure SendGrid
+if (process.env.SENDGRID_API_KEY) {
+  sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+  console.log("✅ SendGrid configured successfully");
+} else {
+  console.log("⚠️ SENDGRID_API_KEY not found. Using console transport.");
+}
+
+const sendEmail = async (mailOptions) => {
+  // If no SendGrid API key, fallback to console logging
+  if (!process.env.SENDGRID_API_KEY) {
+    console.log("📧 Email would be sent to:", mailOptions.to);
+    console.log("📧 Subject:", mailOptions.subject);
+    console.log("🔗 Reset Link:", mailOptions.html.match(/http[^"]*/)?.[0] || "Link not found");
+    console.log("---");
+    return { messageId: "console-log" };
+  }
+
+  try {
+    // Prepare SendGrid email
+    const msg = {
+      to: mailOptions.to,
+      from: process.env.EMAIL_FROM || 'noreply@virtualclassroom.com',
+      subject: mailOptions.subject,
+      html: mailOptions.html,
     };
+
+    // Send email via SendGrid
+    const result = await sgMail.send(msg);
+    console.log(`✅ Email sent successfully to: ${mailOptions.to}`);
+    console.log(`📧 Message ID: ${result[0]?.headers?.['x-message-id'] || 'unknown'}`);
+    return result[0];
+  } catch (error) {
+    console.error('❌ SendGrid error:', error);
+    
+    // If SendGrid fails, fallback to console
+    if (error.response) {
+      console.error('SendGrid response error:', error.response.body);
+    }
+    
+    console.log("📧 Email would be sent to (fallback):", mailOptions.to);
+    console.log("📧 Subject:", mailOptions.subject);
+    console.log("🔗 Reset Link:", mailOptions.html.match(/http[^"]*/)?.[0] || "Link not found");
+    return { messageId: "console-fallback" };
   }
 };
 
-const transporter = createTransporter();
-
-export default transporter;
+export default { sendMail: sendEmail };
