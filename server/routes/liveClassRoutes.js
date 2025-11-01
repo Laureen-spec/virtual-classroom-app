@@ -1148,4 +1148,188 @@ router.post("/screen-share/stop/:sessionId", verifyToken, async (req, res) => {
   }
 });
 
+// 🔹 Start Recording (Teacher only)
+router.post("/recording/start/:sessionId", verifyToken, async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+
+    const liveSession = await LiveSession.findById(sessionId);
+    if (!liveSession) {
+      return res.status(404).json({ message: "Live session not found" });
+    }
+
+    // Check if user is teacher and owns the session
+    if (liveSession.teacherId.toString() !== req.user.id) {
+      return res.status(403).json({ message: "Only the teacher can start recording" });
+    }
+
+    // Check if already recording
+    if (liveSession.recording.isRecording) {
+      return res.status(400).json({ message: "Recording is already in progress" });
+    }
+
+    // Generate unique resource ID and SID for recording
+    const resourceId = `rec_${sessionId}_${Date.now()}`;
+    const sid = `sid_${sessionId}_${Date.now()}`;
+
+    // Update session with recording info
+    liveSession.recording = {
+      isRecording: true,
+      startTime: new Date(),
+      resourceId,
+      sid
+    };
+
+    // Add system message
+    const teacher = await User.findById(req.user.id);
+    liveSession.chatMessages.push({
+      userId: req.user.id,
+      userName: teacher.name,
+      message: `${teacher.name} started recording the session`,
+      messageType: "system",
+      metadata: {
+        action: "recording_started"
+      }
+    });
+
+    await liveSession.save();
+
+    // In a real implementation, you would call Agora Cloud Recording API here
+    console.log(`🎥 Recording started for session ${sessionId}`);
+
+    res.json({
+      message: "Recording started successfully",
+      recording: {
+        isRecording: true,
+        startTime: liveSession.recording.startTime,
+        resourceId,
+        sid
+      }
+    });
+
+  } catch (error) {
+    console.error("Error starting recording:", error);
+    res.status(500).json({ message: "Failed to start recording", error: error.message });
+  }
+});
+
+// 🔹 Stop Recording (Teacher only)
+router.post("/recording/stop/:sessionId", verifyToken, async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+
+    const liveSession = await LiveSession.findById(sessionId);
+    if (!liveSession) {
+      return res.status(404).json({ message: "Live session not found" });
+    }
+
+    // Check if user is teacher and owns the session
+    if (liveSession.teacherId.toString() !== req.user.id) {
+      return res.status(403).json({ message: "Only the teacher can stop recording" });
+    }
+
+    // Check if recording is in progress
+    if (!liveSession.recording.isRecording) {
+      return res.status(400).json({ message: "No recording in progress" });
+    }
+
+    // Update recording info
+    liveSession.recording.isRecording = false;
+    liveSession.recording.endTime = new Date();
+    
+    // Generate mock recording URL (in real implementation, this comes from Agora)
+    liveSession.recording.recordingUrl = `https://your-storage-bucket.com/recordings/${sessionId}_${Date.now()}.mp4`;
+    
+    // Mock file list
+    liveSession.recording.fileList = [{
+      fileName: `recording_${sessionId}_${Date.now()}.mp4`,
+      trackType: "audio_and_video",
+      uid: "mixed",
+      mixedAllUser: true,
+      startTime: liveSession.recording.startTime,
+      endTime: new Date()
+    }];
+
+    // Add system message
+    const teacher = await User.findById(req.user.id);
+    liveSession.chatMessages.push({
+      userId: req.user.id,
+      userName: teacher.name,
+      message: `${teacher.name} stopped recording the session`,
+      messageType: "system",
+      metadata: {
+        action: "recording_stopped"
+      }
+    });
+
+    await liveSession.save();
+
+    console.log(`🎥 Recording stopped for session ${sessionId}`);
+
+    res.json({
+      message: "Recording stopped successfully",
+      recording: {
+        isRecording: false,
+        startTime: liveSession.recording.startTime,
+        endTime: liveSession.recording.endTime,
+        recordingUrl: liveSession.recording.recordingUrl,
+        duration: Math.round((liveSession.recording.endTime - liveSession.recording.startTime) / 1000 / 60) // in minutes
+      }
+    });
+
+  } catch (error) {
+    console.error("Error stopping recording:", error);
+    res.status(500).json({ message: "Failed to stop recording", error: error.message });
+  }
+});
+
+// 🔹 Get Recording Status
+router.get("/recording/status/:sessionId", verifyToken, async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+
+    const liveSession = await LiveSession.findById(sessionId);
+    if (!liveSession) {
+      return res.status(404).json({ message: "Live session not found" });
+    }
+
+    res.json({
+      recording: liveSession.recording
+    });
+
+  } catch (error) {
+    console.error("Error fetching recording status:", error);
+    res.status(500).json({ message: "Failed to fetch recording status", error: error.message });
+  }
+});
+
+// 🔹 Get Session Recordings (For playback after class)
+router.get("/recordings/:classId", verifyToken, async (req, res) => {
+  try {
+    const { classId } = req.params;
+
+    // Find all sessions for this class that have recordings
+    const sessionsWithRecordings = await LiveSession.find({
+      classId,
+      "recording.recordingUrl": { $exists: true, $ne: null }
+    })
+    .select("sessionTitle startTime endTime recording")
+    .sort({ startTime: -1 });
+
+    res.json({
+      recordings: sessionsWithRecordings.map(session => ({
+        sessionId: session._id,
+        sessionTitle: session.sessionTitle,
+        startTime: session.startTime,
+        endTime: session.endTime,
+        recording: session.recording
+      }))
+    });
+
+  } catch (error) {
+    console.error("Error fetching recordings:", error);
+    res.status(500).json({ message: "Failed to fetch recordings", error: error.message });
+  }
+});
+
 export default router;

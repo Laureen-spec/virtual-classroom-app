@@ -148,6 +148,36 @@ const liveSessionSchema = new mongoose.Schema({
       type: Boolean, 
       default: true   // Automatically mute new students when they join
     }
+  },
+  // ADD THESE RECORDING FIELDS:
+  recording: {
+    isRecording: {
+      type: Boolean,
+      default: false
+    },
+    startTime: {
+      type: Date
+    },
+    endTime: {
+      type: Date
+    },
+    resourceId: {
+      type: String
+    },
+    sid: {
+      type: String
+    },
+    recordingUrl: {
+      type: String
+    },
+    fileList: [{
+      fileName: String,
+      trackType: String, // "audio", "video", "audio_and_video"
+      uid: String,
+      mixedAllUser: Boolean,
+      startTime: Date,
+      endTime: Date
+    }]
   }
 }, {
   timestamps: true

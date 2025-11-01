@@ -25,6 +25,10 @@ export default function LiveClass() {
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [screenShareTrack, setScreenShareTrack] = useState(null);
 
+  // ADD THESE RECORDING STATE VARIABLES
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingStatus, setRecordingStatus] = useState(null);
+
   const appId = import.meta.env.VITE_AGORA_APP_ID;
   const client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
   const chatContainerRef = useRef(null);
@@ -156,6 +160,62 @@ export default function LiveClass() {
     }
   };
 
+  // ADD THESE RECORDING FUNCTIONS
+  const startRecording = async () => {
+    try {
+      if (!isTeacher) {
+        alert("Only teachers can start recording");
+        return;
+      }
+
+      const response = await API.post(`/live/recording/start/${sessionId}`);
+      setIsRecording(true);
+      setRecordingStatus(response.data.recording);
+      alert("Recording started successfully!");
+      
+    } catch (err) {
+      console.error("Start recording failed:", err);
+      alert(err.response?.data?.message || "Failed to start recording");
+    }
+  };
+
+  const stopRecording = async () => {
+    try {
+      if (!isTeacher) {
+        alert("Only teachers can stop recording");
+        return;
+      }
+
+      const response = await API.post(`/live/recording/stop/${sessionId}`);
+      setIsRecording(false);
+      setRecordingStatus(response.data.recording);
+      alert("Recording stopped successfully! The recording will be available for playback.");
+      
+    } catch (err) {
+      console.error("Stop recording failed:", err);
+      alert(err.response?.data?.message || "Failed to stop recording");
+    }
+  };
+
+  const toggleRecording = async () => {
+    if (isRecording) {
+      await stopRecording();
+    } else {
+      await startRecording();
+    }
+  };
+
+  // Add this to your polling function to update recording status
+  const updateRecordingStatus = async () => {
+    try {
+      const response = await API.get(`/live/recording/status/${sessionId}`);
+      setRecordingStatus(response.data.recording);
+      setIsRecording(response.data.recording.isRecording);
+    } catch (err) {
+      console.error("Error fetching recording status:", err);
+    }
+  };
+
   // Fetch session info and join class
   const joinClass = async () => {
     try {
@@ -254,6 +314,9 @@ export default function LiveClass() {
             setIsScreenSharing(currentParticipant.isScreenSharing || false);
           }
         }
+
+        // ADD THIS: Update recording status in polling
+        await updateRecordingStatus();
 
       } catch (err) {
         console.error("Error polling session:", err);
@@ -441,6 +504,14 @@ export default function LiveClass() {
         </div>
         
         <div className="flex items-center space-x-4">
+          {/* ADD THIS: Recording Indicator for all participants */}
+          {isRecording && (
+            <div className="bg-red-600 text-white px-3 py-1 rounded-full text-sm flex items-center">
+              <span className="animate-pulse mr-2">🔴</span>
+              RECORDING
+            </div>
+          )}
+
           {/* ADD THIS: Screen Share Button for Teachers */}
           {isTeacher && (
             <button
@@ -547,6 +618,30 @@ export default function LiveClass() {
           {isTeacher && (
             <div className="mt-6 bg-gray-800 p-4 rounded-lg">
               <h3 className="text-lg font-semibold mb-3">Teacher Controls</h3>
+              
+              {/* ADD THIS: Recording Controls */}
+              <div className="mb-4 p-3 bg-red-600 bg-opacity-20 rounded">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="font-semibold">Recording: {isRecording ? "🔴 RECORDING" : "⏸️ NOT RECORDING"}</span>
+                    {isRecording && recordingStatus?.startTime && (
+                      <div className="text-xs text-gray-300">
+                        Started: {new Date(recordingStatus.startTime).toLocaleTimeString()}
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    onClick={toggleRecording}
+                    className={`px-3 py-1 rounded text-sm ${
+                      isRecording 
+                        ? "bg-red-600 hover:bg-red-700" 
+                        : "bg-green-600 hover:bg-green-700"
+                    }`}
+                  >
+                    {isRecording ? "⏹️ Stop Recording" : "🔴 Start Recording"}
+                  </button>
+                </div>
+              </div>
               
               {/* ADD THIS: Screen Sharing Status */}
               <div className="mb-4 p-3 bg-purple-600 bg-opacity-20 rounded">
