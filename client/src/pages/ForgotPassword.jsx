@@ -19,12 +19,14 @@ function ForgotPassword() {
       const res = await API.post("/auth/forgot-password", { email });
       
       setSuccess(res.data.message);
-      console.log("🔗 Reset URL (for testing):", res.data.resetUrl);
       
-      // For development - show the reset link
-      if (res.data.resetUrl) {
-        setSuccess(prev => prev + " Check console for reset link.");
-      }
+      // REMOVE THIS: Don't show reset link in production
+      // console.log("🔗 Reset URL (for testing):", res.data.resetUrl);
+      
+      // REMOVE THIS: Don't show reset link in production
+      // if (res.data.resetUrl) {
+      //   setSuccess(prev => prev + " Check console for reset link.");
+      // }
       
     } catch (err) {
       setError(err.response?.data?.message || "Failed to process request");

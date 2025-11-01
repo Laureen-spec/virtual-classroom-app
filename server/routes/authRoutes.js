@@ -272,17 +272,15 @@ router.post("/forgot-password", async (req, res) => {
       `,
     };
 
-    // Send email (console log for development)
+    // Send email
     await transporter.sendMail(mailOptions);
 
-    console.log(`✅ Password reset token generated for: ${user.email}`);
-    console.log(`🔗 Reset URL: ${resetUrl}`);
+    console.log(`✅ Password reset email sent to: ${user.email}`);
     console.log(`⏰ Token expires at: ${new Date(user.resetPasswordExpires).toLocaleString()}`);
 
+    // Use this for production - don't send reset URL in response
     return res.status(200).json({
       message: "If your email is registered, you will receive a password reset link shortly.",
-      // For development only - remove in production:
-      resetUrl: resetUrl,
     });
 
   } catch (err) {
