@@ -363,28 +363,6 @@ export default function AdminDashboard() {
               <ActiveLiveClasses />
             </div>
 
-            {/* Quick Stats - UPDATED: Mobile responsive grid */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6 sm:mb-8">
-              {[
-                { label: "Total Teachers", value: teachers.length, color: "from-indigo-500 to-purple-500" },
-                { label: "Total Students", value: students.length, color: "from-green-500 to-emerald-500" },
-                {
-                  label: "Total Classes",
-                  value: upcomingClasses.length + ongoingClasses.length + pastClasses.length,
-                  color: "from-blue-500 to-cyan-500",
-                },
-                { label: "Subscriptions", value: subscriptions.length, color: "from-pink-500 to-red-500" },
-              ].map((stat, i) => (
-                <div
-                  key={i}
-                  className={`bg-gradient-to-br ${stat.color} p-3 sm:p-4 lg:p-5 rounded-2xl shadow-lg text-center transform hover:scale-105 transition-all duration-300`}
-                >
-                  <h2 className="text-white/90 text-xs sm:text-sm uppercase">{stat.label}</h2>
-                  <p className="text-xl sm:text-2xl lg:text-3xl font-extrabold mt-1 sm:mt-2">{stat.value}</p>
-                </div>
-              ))}
-            </div>
-
             {/* Teachers - UPDATED: Mobile responsive */}
             <div className="bg-white/10 rounded-2xl shadow-lg shadow-indigo-500/30 p-4 sm:p-5 mb-4 sm:mb-6 border border-white/20">
               <h2 className="text-xl sm:text-2xl font-semibold text-indigo-200 mb-3">👩‍🏫 Teachers</h2>
