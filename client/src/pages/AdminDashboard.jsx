@@ -102,27 +102,29 @@ export default function AdminDashboard() {
     }
   };
 
-  // ✅ Fetch all data for admin
+  // ✅ Fetch all data for admin - FIXED VERSION
   const fetchAdminData = async () => {
     try {
-      const [teacherRes, studentRes, upcomingRes, ongoingRes, pastRes, subRes, allUsersRes] =
+      const [allUsersRes, upcomingRes, ongoingRes, pastRes, subRes] =
         await Promise.all([
-          API.get("/admin/teachers"),
-          API.get("/admin/students"),
+          API.get("/auth/admin/all-users"),  // ✅ Get all users once
           API.get("/schedule/upcoming"),
           API.get("/schedule/ongoing"),
           API.get("/schedule/past"),
           API.get("/subscriptions"),
-          API.get("/auth/admin/all-users"), // NEW: Fetch all users
         ]);
 
-      setTeachers(teacherRes.data);
-      setStudents(studentRes.data);
+      // ✅ Filter users by role from the all-users response
+      const teachers = allUsersRes.data.users.filter(user => user.role === "teacher");
+      const students = allUsersRes.data.users.filter(user => user.role === "student");
+
+      setTeachers(teachers);
+      setStudents(students);
+      setAllUsers(allUsersRes.data.users);
       setUpcomingClasses(upcomingRes.data);
       setOngoingClasses(ongoingRes.data);
       setPastClasses(pastRes.data);
       setSubscriptions(subRes.data);
-      setAllUsers(allUsersRes.data.users); // NEW: Set all users
       setLoading(false);
     } catch (err) {
       console.error("Error fetching admin data:", err);
