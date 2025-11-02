@@ -1,6 +1,6 @@
 import express from "express";
 import ClassSchedule from "../models/ClassSchedule.js";
-import LiveSession from "../models/LiveSession.js"; // Add this import
+import LiveSession from "../models/LiveSession.js";
 import { verifyToken, roleCheck } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
@@ -19,7 +19,7 @@ router.post("/create", verifyToken, roleCheck(["teacher"]), async (req, res) => 
     const newClass = new ClassSchedule({
       title,
       description,
-      teacher: req.user.id, // assigned automatically
+      teacher: req.user.id,
       startTime,
       endTime,
       meetingLink,
@@ -37,13 +37,23 @@ router.post("/create", verifyToken, roleCheck(["teacher"]), async (req, res) => 
 });
 
 /* ===================================================
-   📅 GET UPCOMING CLASSES
+   📅 GET UPCOMING CLASSES (All Users + Admin)
 =================================================== */
 router.get("/upcoming", verifyToken, async (req, res) => {
   try {
     const now = new Date();
-    const classes = await ClassSchedule.find({ startTime: { $gt: now } })
-      .populate("teacher", "name email");
+    let query = { startTime: { $gt: now } };
+    
+    // If user is teacher, only show their classes. Admin sees all.
+    if (req.user.role === "teacher") {
+      query.teacher = req.user.id;
+    }
+    // Admin and students see all classes (no teacher filter)
+
+    const classes = await ClassSchedule.find(query)
+      .populate("teacher", "name email")
+      .sort({ startTime: 1 }); // Sort by upcoming first
+
     res.json(classes);
   } catch (error) {
     console.error("❌ Error fetching upcoming classes:", error);
@@ -52,15 +62,26 @@ router.get("/upcoming", verifyToken, async (req, res) => {
 });
 
 /* ===================================================
-   🕒 GET ONGOING CLASSES
+   🕒 GET ONGOING CLASSES (All Users + Admin)
 =================================================== */
 router.get("/ongoing", verifyToken, async (req, res) => {
   try {
     const now = new Date();
-    const classes = await ClassSchedule.find({
+    let query = {
       startTime: { $lte: now },
       endTime: { $gte: now },
-    }).populate("teacher", "name email");
+    };
+    
+    // If user is teacher, only show their classes. Admin sees all.
+    if (req.user.role === "teacher") {
+      query.teacher = req.user.id;
+    }
+    // Admin and students see all classes (no teacher filter)
+
+    const classes = await ClassSchedule.find(query)
+      .populate("teacher", "name email")
+      .sort({ startTime: 1 });
+
     res.json(classes);
   } catch (error) {
     console.error("❌ Error fetching ongoing classes:", error);
@@ -69,13 +90,23 @@ router.get("/ongoing", verifyToken, async (req, res) => {
 });
 
 /* ===================================================
-   🕓 GET PAST CLASSES
+   🕓 GET PAST CLASSES (All Users + Admin)
 =================================================== */
 router.get("/past", verifyToken, async (req, res) => {
   try {
     const now = new Date();
-    const classes = await ClassSchedule.find({ endTime: { $lt: now } })
-      .populate("teacher", "name email");
+    let query = { endTime: { $lt: now } };
+    
+    // If user is teacher, only show their classes. Admin sees all.
+    if (req.user.role === "teacher") {
+      query.teacher = req.user.id;
+    }
+    // Admin and students see all classes (no teacher filter)
+
+    const classes = await ClassSchedule.find(query)
+      .populate("teacher", "name email")
+      .sort({ endTime: -1 }); // Sort by most recent first
+
     res.json(classes);
   } catch (error) {
     console.error("❌ Error fetching past classes:", error);
@@ -114,14 +145,14 @@ router.get("/active-live", verifyToken, async (req, res) => {
 });
 
 /* ===================================================
-   ✏️ UPDATE CLASS (Teacher Only)
+   ✏️ UPDATE CLASS (Teacher Only - Own Classes)
 =================================================== */
 router.put("/:id", verifyToken, roleCheck(["teacher"]), async (req, res) => {
   try {
     const { id } = req.params;
 
     const updated = await ClassSchedule.findOneAndUpdate(
-      { _id: id, teacher: req.user.id }, // ensure teacher can only update their own class
+      { _id: id, teacher: req.user.id }, // teacher can only update their own class
       req.body,
       { new: true }
     );
@@ -141,7 +172,7 @@ router.put("/:id", verifyToken, roleCheck(["teacher"]), async (req, res) => {
 });
 
 /* ===================================================
-   🗑️ DELETE CLASS (Teacher Only)
+   🗑️ DELETE CLASS (Teacher Only - Own Classes)
 =================================================== */
 router.delete("/:id", verifyToken, roleCheck(["teacher"]), async (req, res) => {
   try {
@@ -149,7 +180,7 @@ router.delete("/:id", verifyToken, roleCheck(["teacher"]), async (req, res) => {
 
     const deleted = await ClassSchedule.findOneAndDelete({
       _id: id,
-      teacher: req.user.id, // ensures teacher only deletes their own classes
+      teacher: req.user.id, // teacher can only delete their own classes
     });
 
     if (!deleted) {
@@ -160,6 +191,22 @@ router.delete("/:id", verifyToken, roleCheck(["teacher"]), async (req, res) => {
   } catch (error) {
     console.error("❌ Error deleting class:", error);
     res.status(500).json({ message: "Failed to delete class" });
+  }
+});
+
+/* ===================================================
+   👑 ADMIN: GET ALL CLASSES (Admin Only)
+=================================================== */
+router.get("/admin/all-classes", verifyToken, roleCheck(["admin"]), async (req, res) => {
+  try {
+    const classes = await ClassSchedule.find()
+      .populate("teacher", "name email")
+      .sort({ startTime: -1 });
+
+    res.json(classes);
+  } catch (error) {
+    console.error("❌ Error fetching all classes for admin:", error);
+    res.status(500).json({ message: "Failed to fetch classes" });
   }
 });
 
