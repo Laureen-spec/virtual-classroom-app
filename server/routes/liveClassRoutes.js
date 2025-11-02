@@ -1,10 +1,14 @@
 import express from "express";
 import { verifyToken } from "../middleware/authMiddleware.js";
-import { checkSubscription } from "../middleware/subscriptionMiddleware.js"; // NEW IMPORT
+import { checkSubscription } from "../middleware/subscriptionMiddleware.js";
 import LiveSession from "../models/LiveSession.js";
 import ClassSchedule from "../models/ClassSchedule.js";
 import User from "../models/User.js";
-import { generateAgoraToken, RtcRole } from "../utils/agoraTokenGenerator.js";
+import { generateAgoraToken } from "../utils/agoraTokenGenerator.js";
+import agoraToken from "agora-token";
+
+// FIX: Define RtcRole directly from agora-token package
+const RtcRole = agoraToken.RtcRole;
 
 const router = express.Router();
 
@@ -88,7 +92,7 @@ router.post("/start", verifyToken, async (req, res) => {
   }
 });
 
-// 🔹 Check if teacher can rejoin their live session - ADD THIS NEW ROUTE
+// 🔹 Check if teacher can rejoin their live session
 router.get("/teacher-session/:classId", verifyToken, async (req, res) => {
   try {
     const { classId } = req.params;
@@ -229,7 +233,7 @@ router.post("/join/:sessionId", verifyToken, checkSubscription, async (req, res)
         isMuted,
         hasSpeakingPermission,
         canSelfUnmute: hasSpeakingPermission && !isMuted,
-        role: req.user.role === "teacher" ? "host" : "audience" // ADDED: Include role in response
+        role: req.user.role === "teacher" ? "host" : "audience"
       },
       token,
       appId: process.env.VITE_AGORA_APP_ID
@@ -1044,7 +1048,7 @@ router.put("/leave/:sessionId", verifyToken, async (req, res) => {
   }
 });
 
-// 🔹 Start Screen Sharing (Teacher only) - ADD THIS NEW ROUTE
+// 🔹 Start Screen Sharing (Teacher only)
 router.post("/screen-share/start/:sessionId", verifyToken, async (req, res) => {
   try {
     const { sessionId } = req.params;
@@ -1096,7 +1100,7 @@ router.post("/screen-share/start/:sessionId", verifyToken, async (req, res) => {
   }
 });
 
-// 🔹 Stop Screen Sharing (Teacher only) - ADD THIS NEW ROUTE
+// 🔹 Stop Screen Sharing (Teacher only)
 router.post("/screen-share/stop/:sessionId", verifyToken, async (req, res) => {
   try {
     const { sessionId } = req.params;
