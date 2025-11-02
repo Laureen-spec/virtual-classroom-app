@@ -37,6 +37,9 @@ export default function AdminDashboard() {
   });
   const [userMessage, setUserMessage] = useState("");
 
+  // NEW STATE: All Users
+  const [allUsers, setAllUsers] = useState([]);
+
   // ADDED: Change Password Navigation
   const goToChangePassword = () => {
     navigate("/change-password");
@@ -89,10 +92,20 @@ export default function AdminDashboard() {
     setUserForm(prev => ({ ...prev, [name]: value }));
   };
 
+  // NEW FUNCTION: Fetch all users
+  const fetchAllUsers = async () => {
+    try {
+      const response = await API.get("/auth/admin/all-users");
+      setAllUsers(response.data.users);
+    } catch (err) {
+      console.error("Error fetching all users:", err);
+    }
+  };
+
   // ✅ Fetch all data for admin
   const fetchAdminData = async () => {
     try {
-      const [teacherRes, studentRes, upcomingRes, ongoingRes, pastRes, subRes] =
+      const [teacherRes, studentRes, upcomingRes, ongoingRes, pastRes, subRes, allUsersRes] =
         await Promise.all([
           API.get("/admin/teachers"),
           API.get("/admin/students"),
@@ -100,6 +113,7 @@ export default function AdminDashboard() {
           API.get("/schedule/ongoing"),
           API.get("/schedule/past"),
           API.get("/subscriptions"),
+          API.get("/auth/admin/all-users"), // NEW: Fetch all users
         ]);
 
       setTeachers(teacherRes.data);
@@ -108,6 +122,7 @@ export default function AdminDashboard() {
       setOngoingClasses(ongoingRes.data);
       setPastClasses(pastRes.data);
       setSubscriptions(subRes.data);
+      setAllUsers(allUsersRes.data.users); // NEW: Set all users
       setLoading(false);
     } catch (err) {
       console.error("Error fetching admin data:", err);
@@ -587,6 +602,65 @@ export default function AdminDashboard() {
                   <p className="text-gray-300">No students found.</p>
                 )}
               </div>
+            </div>
+
+            {/* All Users List - NEW SECTION */}
+            <div className="bg-white/10 rounded-2xl shadow-lg shadow-cyan-500/30 p-4 sm:p-5 border border-white/20">
+              <h2 className="text-lg sm:text-xl font-semibold text-cyan-200 mb-3">
+                👥 All Users ({allUsers.length})
+              </h2>
+              {allUsers.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse">
+                    <thead>
+                      <tr className="bg-cyan-600/50 text-white">
+                        <th className="py-2 px-2 sm:py-3 sm:px-4 text-left text-xs sm:text-sm">Name</th>
+                        <th className="py-2 px-2 sm:py-3 sm:px-4 text-left text-xs sm:text-sm">Email</th>
+                        <th className="py-2 px-2 sm:py-3 sm:px-4 text-left text-xs sm:text-sm">Role</th>
+                        <th className="py-2 px-2 sm:py-3 sm:px-4 text-left text-xs sm:text-sm">Joined</th>
+                        <th className="py-2 px-2 sm:py-3 sm:px-4 text-left text-xs sm:text-sm">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {allUsers.map((user) => (
+                        <tr
+                          key={user._id}
+                          className="border-b border-white/10 hover:bg-white/10 transition-all"
+                        >
+                          <td className="py-2 px-2 sm:py-3 sm:px-4 text-white text-xs sm:text-sm">
+                            {user.name}
+                          </td>
+                          <td className="py-2 px-2 sm:py-3 sm:px-4 text-gray-200 text-xs sm:text-sm">
+                            {user.email}
+                          </td>
+                          <td className="py-2 px-2 sm:py-3 sm:px-4">
+                            <span className={`px-2 py-1 rounded-full text-xs ${
+                              user.role === 'admin' ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30' :
+                              user.role === 'teacher' ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30' :
+                              'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                            }`}>
+                              {user.role}
+                            </span>
+                          </td>
+                          <td className="py-2 px-2 sm:py-3 sm:px-4 text-gray-200 text-xs sm:text-sm">
+                            {new Date(user.createdAt).toLocaleDateString()}
+                          </td>
+                          <td className="py-2 px-2 sm:py-3 sm:px-4">
+                            <span className={`px-2 py-1 rounded-full text-xs ${
+                              user.isActive === false ? 'bg-red-500/20 text-red-300 border border-red-500/30' :
+                              'bg-green-500/20 text-green-300 border border-green-500/30'
+                            }`}>
+                              {user.isActive === false ? 'Inactive' : 'Active'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="text-gray-300">No users found.</p>
+              )}
             </div>
           </div>
         )}

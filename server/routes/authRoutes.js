@@ -197,6 +197,27 @@ router.post("/create-user", verifyToken, roleCheck(["admin"]), async (req, res) 
   }
 });
 
+// 🔹 Admin: Get All Users (Admin Only)
+router.get("/admin/all-users", verifyToken, roleCheck(["admin"]), async (req, res) => {
+  try {
+    const users = await User.find()
+      .select("name email role createdAt isActive") // Select only necessary fields
+      .sort({ createdAt: -1 }); // Sort by newest first
+
+    return res.status(200).json({
+      message: "Users fetched successfully",
+      users,
+      total: users.length
+    });
+  } catch (err) {
+    console.error("Get all users error:", err.message);
+    return res.status(500).json({ 
+      message: "Failed to fetch users", 
+      error: err.message 
+    });
+  }
+});
+
 // 🔹 Forgot Password
 router.post("/forgot-password", async (req, res) => {
   try {
