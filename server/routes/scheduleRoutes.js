@@ -125,17 +125,27 @@ router.get("/active-live", verifyToken, async (req, res) => {
       .select("sessionTitle startTime participants channelName classId teacherId")
       .sort({ startTime: -1 });
 
-    const sessionsWithCount = activeSessions.map(session => ({
-      _id: session._id,
-      sessionTitle: session.sessionTitle,
-      teacherName: session.teacherId.name,
-      teacherEmail: session.teacherId.email,
-      className: session.classId.title,
-      classId: session.classId._id,
-      startTime: session.startTime,
-      participantCount: session.participants.length,
-      channelName: session.channelName
-    }));
+    // FIX: Safe mapping with fallbacks
+    const sessionsWithCount = activeSessions.map(session => {
+      // Check if classId exists and has title, otherwise use sessionTitle
+      const className = session.classId?.title || session.sessionTitle || "Live Session";
+      
+      // Check if teacherId exists
+      const teacherName = session.teacherId?.name || "Unknown Teacher";
+      const teacherEmail = session.teacherId?.email || "";
+
+      return {
+        _id: session._id,
+        sessionTitle: session.sessionTitle,
+        teacherName: teacherName,
+        teacherEmail: teacherEmail,
+        className: className,
+        classId: session.classId?._id || session._id,
+        startTime: session.startTime,
+        participantCount: session.participants.length,
+        channelName: session.channelName
+      };
+    });
 
     res.json(sessionsWithCount);
   } catch (error) {
