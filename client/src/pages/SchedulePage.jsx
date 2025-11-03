@@ -64,8 +64,8 @@ export default function SchedulePage() {
               <li key={cls._id} className="py-3">
                 <p className="font-semibold text-gray-800">{cls.title}</p>
                 <p className="text-sm text-gray-500">
-                  {new Date(cls.startTime).toLocaleString()} →{" "}
-                  {new Date(cls.endTime).toLocaleString()}
+                  {new Date(cls.startTime).toLocaleString("en-GB", { timeZone: "UTC" })} →{" "}
+                  {new Date(cls.endTime).toLocaleString("en-GB", { timeZone: "UTC" })}
                 </p>
                 <p className="text-gray-600">
                   {cls.teacher?.name ? `Teacher: ${cls.teacher.name}` : ""}
