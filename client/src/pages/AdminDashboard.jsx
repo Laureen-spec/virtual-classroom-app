@@ -435,7 +435,7 @@ export default function AdminDashboard() {
                           key={cls._id}
                           className="border-b border-white/10 pb-1 text-gray-200 hover:text-white transition-all text-xs sm:text-sm"
                         >
-                          {cls.title} — {new Date(cls.startTime).toLocaleString()}
+                          {cls.title} — {new Date(cls.startTime).toLocaleString("en-GB", { timeZone: "UTC" })}
                         </li>
                       ))}
                     </ul>
@@ -454,7 +454,8 @@ export default function AdminDashboard() {
                           key={cls._id}
                           className="border-b border-white/10 pb-1 text-gray-200 hover:text-white transition-all text-xs sm:text-sm"
                         >
-                          {cls.title} — ends at {new Date(cls.endTime).toLocaleString()}
+                          {cls.title} — {new Date(cls.startTime).toLocaleString("en-GB", { timeZone: "UTC" })} →{" "}
+                          {new Date(cls.endTime).toLocaleString("en-GB", { timeZone: "UTC" })}
                         </li>
                       ))}
                     </ul>
@@ -473,7 +474,7 @@ export default function AdminDashboard() {
                           key={cls._id}
                           className="border-b border-white/10 pb-1 text-gray-200 hover:text-white transition-all text-xs sm:text-sm"
                         >
-                          {cls.title} — ended at {new Date(cls.endTime).toLocaleString()}
+                          {cls.title} — ended at {new Date(cls.endTime).toLocaleString("en-GB", { timeZone: "UTC" })}
                         </li>
                       ))}
                     </ul>
