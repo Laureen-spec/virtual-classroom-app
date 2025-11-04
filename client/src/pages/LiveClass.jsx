@@ -142,28 +142,6 @@ export default function LiveClass() {
     }
   };
 
-  // End Live Class (Teacher only)
-  const endLiveClass = async () => {
-    if (!window.confirm("Are you sure you want to end this live class for everyone?")) return;
-
-    try {
-      await API.put(`/live/end/${sessionId}`);
-      alert("Live class ended successfully.");
-      // Redirect teacher to their dashboard after ending class
-      const userRole = localStorage.getItem("role");
-      if (userRole === "teacher") {
-        navigate("/teacher");
-      } else if (userRole === "admin") {
-        navigate("/admin");
-      } else {
-        navigate("/student");
-      }
-    } catch (err) {
-      console.error("End live class failed:", err);
-      alert(err.response?.data?.message || "Failed to end class");
-    }
-  };
-
   // Recording functions
   const startRecording = async () => {
     try {
@@ -318,59 +296,115 @@ export default function LiveClass() {
     }
   };
 
-  // ✅ FIXED: Poll for session updates with proper chat handling
+  // ✅ FIXED: Poll for session updates with proper error handling
   const startSessionPolling = () => {
+    console.log("🔄 Starting enhanced session polling...");
+    
     const interval = setInterval(async () => {
-      if (!sessionId) return;
+      if (!sessionId) {
+        console.log("❌ No sessionId available for polling");
+        return;
+      }
+      
       try {
+        console.log("📡 Polling session data for:", sessionId);
         const response = await API.get(`/live/session/${sessionId}`);
-        console.log("🔍 Full session response:", response.data); // Debug log
         
-        const { participants, chatMessages, permissionRequests, isActive } = response.data;
-
-        console.log("📨 Polling - Chat messages:", chatMessages); // Debug log
-
-        // Only check if class is active - don't auto-redirect
-        if (!isActive) {
-          console.log("Class has ended");
+        if (!response.data) {
+          console.log("❌ No data in polling response");
           return;
         }
+
+        const { 
+          participants, 
+          chatMessages, 
+          permissionRequests, 
+          isActive, 
+          userPermissions 
+        } = response.data;
+
+        console.log("🔍 POLLING DEBUG:");
+        console.log("- Session isActive:", isActive);
+        console.log("- Chat messages received:", chatMessages?.length || 0);
+        console.log("- User permissions:", userPermissions);
         
-        setParticipants(participants);
-        
-        // ✅ FIX: Properly set chat messages - ensure it's always an array
-        if (chatMessages && Array.isArray(chatMessages)) {
-          setChatMessages(chatMessages);
-        } else {
-          console.warn("⚠️ Chat messages is not an array, setting to empty array");
-          setChatMessages([]); // Fallback to empty array
+        // CRITICAL FIX: Update teacher status from backend
+        if (userPermissions) {
+          console.log("🎯 Updating teacher status from backend:", userPermissions.isTeacher);
+          setIsTeacher(userPermissions.isTeacher);
+        }
+
+        // Only stop if session is truly ended
+        if (isActive === false) {
+          console.log("⏹️ Session has ended - stopping updates");
+          // Don't return here, we still want to update UI with final state
         }
         
-        if (isTeacher) {
-          setPendingRequests(permissionRequests.filter(req => req.status === "pending"));
+        // Update participants
+        if (participants && Array.isArray(participants)) {
+          setParticipants(participants);
+        }
+        
+        // CRITICAL FIX: Update chat messages with proper validation
+        if (chatMessages && Array.isArray(chatMessages)) {
+          console.log("💬 Setting chat messages:", chatMessages.length);
+          setChatMessages(chatMessages);
+          
+          // Debug first message
+          if (chatMessages.length > 0) {
+            console.log("💬 First message sample:", {
+              userName: chatMessages[0].userName,
+              message: chatMessages[0].message,
+              type: chatMessages[0].messageType
+            });
+          }
+        } else {
+          console.log("⚠️ No valid chat messages in response");
+          setChatMessages([]);
+        }
+        
+        // Update pending requests for teachers
+        if (userPermissions?.isTeacher && permissionRequests) {
+          const pending = permissionRequests.filter(req => req.status === "pending");
+          setPendingRequests(pending);
+          console.log("📋 Pending requests:", pending.length);
         }
 
         // Update local state based on participant info
-        const currentParticipant = participants.find(p => p.studentId === localStorage.getItem("userId"));
-        if (currentParticipant) {
-          setIsMuted(currentParticipant.isMuted);
-          setHasSpeakingPermission(currentParticipant.hasSpeakingPermission);
-          setIsHandRaised(currentParticipant.isHandRaised);
-          // Update screen sharing state
-          if (isTeacher) {
-            setIsScreenSharing(currentParticipant.isScreenSharing || false);
+        const currentUserId = localStorage.getItem("userId");
+        if (participants && currentUserId) {
+          const currentParticipant = participants.find(p => p.studentId === currentUserId);
+          if (currentParticipant) {
+            console.log("👤 Updating participant state:", {
+              isMuted: currentParticipant.isMuted,
+              hasPermission: currentParticipant.hasSpeakingPermission,
+              handRaised: currentParticipant.isHandRaised
+            });
+            
+            setIsMuted(currentParticipant.isMuted);
+            setHasSpeakingPermission(currentParticipant.hasSpeakingPermission);
+            setIsHandRaised(currentParticipant.isHandRaised);
+            
+            // Update screen sharing state for teacher
+            if (userPermissions?.isTeacher) {
+              setIsScreenSharing(currentParticipant.isScreenSharing || false);
+            }
           }
         }
 
-        // Update recording status in polling
+        // Update recording status
         await updateRecordingStatus();
 
       } catch (err) {
-        console.error("Error polling session:", err);
+        console.error("❌ Polling error:", err);
+        console.error("Error details:", err.response?.data);
       }
     }, 3000);
 
-    return () => clearInterval(interval);
+    return () => {
+      console.log("🛑 Clearing polling interval");
+      clearInterval(interval);
+    };
   };
 
   // Toggle mute/unmute
@@ -432,13 +466,18 @@ export default function LiveClass() {
     }
   };
 
-  // Teacher controls
+  // Teacher controls with enhanced permission checking
   const grantSpeakingPermission = async (studentId) => {
     try {
+      console.log("🎯 Granting permission to:", studentId);
+      console.log("🎯 Current user is teacher:", isTeacher);
+      
       await API.put(`/live/grant-speaking/${sessionId}/${studentId}`);
       setPendingRequests(prev => prev.filter(req => req.studentId !== studentId));
+      console.log("✅ Permission granted successfully");
     } catch (err) {
-      console.error("Grant permission failed:", err);
+      console.error("❌ Grant permission failed:", err);
+      alert(err.response?.data?.message || "Failed to grant permission");
     }
   };
 
@@ -452,17 +491,25 @@ export default function LiveClass() {
 
   const muteStudent = async (studentId) => {
     try {
-      await API.put(`/live/mute/${sessionId}/${studentId}`, { mute: true });
+      console.log("🔇 Muting student:", studentId);
+      console.log("🔇 Current user is teacher:", isTeacher);
+      
+      const response = await API.put(`/live/mute/${sessionId}/${studentId}`, { mute: true });
+      console.log("✅ Student muted:", response.data);
     } catch (err) {
-      console.error("Mute student failed:", err);
+      console.error("❌ Mute student failed:", err);
+      console.error("Error response:", err.response?.data);
+      alert(err.response?.data?.message || "Failed to mute student");
     }
   };
 
   const unmuteStudent = async (studentId) => {
     try {
+      console.log("🔊 Unmuting student:", studentId);
       await API.put(`/live/mute/${sessionId}/${studentId}`, { mute: false });
     } catch (err) {
-      console.error("Unmute student failed:", err);
+      console.error("❌ Unmute student failed:", err);
+      alert(err.response?.data?.message || "Failed to unmute student");
     }
   };
 
@@ -479,6 +526,36 @@ export default function LiveClass() {
       await API.put(`/live/unmute-all/${sessionId}`);
     } catch (err) {
       console.error("Unmute all failed:", err);
+    }
+  };
+
+  // End Live Class (Teacher only) - Enhanced with better error handling
+  const endLiveClass = async () => {
+    if (!window.confirm("Are you sure you want to end this live class for everyone?")) return;
+
+    try {
+      console.log("🛑 Attempting to end class...");
+      console.log("🛑 Current user is teacher:", isTeacher);
+      console.log("🛑 Session ID:", sessionId);
+      
+      const response = await API.put(`/live/end/${sessionId}`);
+      console.log("✅ Class ended successfully:", response.data);
+      
+      alert("Live class ended successfully.");
+      
+      // Redirect based on role
+      const userRole = localStorage.getItem("role");
+      if (userRole === "teacher") {
+        navigate("/teacher");
+      } else if (userRole === "admin") {
+        navigate("/admin");
+      } else {
+        navigate("/student");
+      }
+    } catch (err) {
+      console.error("❌ End live class failed:", err);
+      console.error("Error response:", err.response?.data);
+      alert(err.response?.data?.message || "Failed to end class. Please check if you're the teacher of this session.");
     }
   };
 
@@ -659,6 +736,20 @@ export default function LiveClass() {
                 </div>
               </div>
             ))}
+          </div>
+
+          {/* Temporary Debug Panel - Remove after testing */}
+          <div className="mt-4 p-3 bg-gray-800 rounded-lg">
+            <h4 className="font-semibold text-yellow-400 mb-2">🔧 Debug Info</h4>
+            <div className="text-xs space-y-1">
+              <div>Session ID: {sessionId}</div>
+              <div>User ID: {localStorage.getItem("userId")}</div>
+              <div>User Role: {localStorage.getItem("role")}</div>
+              <div>Is Teacher: {isTeacher ? "✅ YES" : "❌ NO"}</div>
+              <div>Chat Messages: {chatMessages.length}</div>
+              <div>Session Active: {sessionInfo?.isActive ? "✅ YES" : "❌ NO"}</div>
+              <div>Joined: {joined ? "✅ YES" : "❌ NO"}</div>
+            </div>
           </div>
 
           {/* Teacher Controls */}

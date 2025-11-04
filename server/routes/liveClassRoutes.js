@@ -839,10 +839,14 @@ router.get("/pending-requests/:sessionId", verifyToken, async (req, res) => {
   }
 });
 
-// 🔹 Enhanced Get Session Info (includes permission data)
+// 🔹 Enhanced Get Session Info (FIXED session status detection)
 router.get("/session/:sessionId", verifyToken, async (req, res) => {
   try {
     const { sessionId } = req.params;
+
+    console.log("🔍 DEBUG: Fetching session info for:", sessionId);
+    console.log("🔍 DEBUG: Request user ID:", req.user.id);
+    console.log("🔍 DEBUG: Request user role:", req.user.role);
 
     const liveSession = await LiveSession.findById(sessionId)
       .populate("classId", "title description")
@@ -852,11 +856,36 @@ router.get("/session/:sessionId", verifyToken, async (req, res) => {
       .populate("permissionRequests.studentId", "name");
 
     if (!liveSession) {
+      console.log("❌ Session not found:", sessionId);
       return res.status(404).json({ message: "Live session not found" });
     }
 
-    res.json({
-      session: liveSession,
+    console.log("🔍 DEBUG: Session found - isActive:", liveSession.isActive);
+    console.log("🔍 DEBUG: Teacher ID:", liveSession.teacherId._id.toString());
+    console.log("🔍 DEBUG: Request user ID:", req.user.id);
+    console.log("🔍 DEBUG: Is user teacher?", liveSession.teacherId._id.toString() === req.user.id);
+
+    // Check if current user is the teacher
+    const isUserTeacher = liveSession.teacherId._id.toString() === req.user.id;
+    const isUserAdmin = req.user.role === "admin";
+
+    console.log("🔍 DEBUG: User is teacher:", isUserTeacher);
+    console.log("🔍 DEBUG: User is admin:", isUserAdmin);
+
+    // Prepare response with enhanced participant info
+    const responseData = {
+      session: {
+        _id: liveSession._id,
+        classId: liveSession.classId,
+        teacherId: liveSession.teacherId,
+        channelName: liveSession.channelName,
+        sessionTitle: liveSession.sessionTitle,
+        isActive: liveSession.isActive,
+        startTime: liveSession.startTime,
+        endTime: liveSession.endTime,
+        settings: liveSession.settings,
+        recording: liveSession.recording
+      },
       participants: liveSession.participants.map(p => ({
         studentId: p.studentId._id,
         name: p.studentId.name,
@@ -868,10 +897,11 @@ router.get("/session/:sessionId", verifyToken, async (req, res) => {
         videoOn: p.videoOn,
         totalTimeSpent: p.totalTimeSpent,
         lastJoinTime: p.lastJoinTime,
-        joinedAt: p.joinedAt
+        joinedAt: p.joinedAt,
+        isScreenSharing: p.isScreenSharing
       })),
       chatMessages: liveSession.chatMessages.map(m => ({
-        userName: m.userId.name,
+        userName: m.userId?.name || "System",
         message: m.message,
         timestamp: m.timestamp,
         messageType: m.messageType,
@@ -885,11 +915,23 @@ router.get("/session/:sessionId", verifyToken, async (req, res) => {
         requestedAt: r.requestedAt,
         handledAt: r.handledAt
       })),
-      settings: liveSession.settings
-    });
+      settings: liveSession.settings,
+      // ADD CRITICAL FIELDS FOR FRONTEND:
+      userPermissions: {
+        isTeacher: isUserTeacher,
+        isAdmin: isUserAdmin,
+        canManageSession: isUserTeacher || isUserAdmin,
+        userId: req.user.id
+      }
+    };
+
+    console.log("🔍 DEBUG: Sending response with", responseData.chatMessages.length, "chat messages");
+    console.log("🔍 DEBUG: First chat message:", responseData.chatMessages[0]);
+
+    res.json(responseData);
 
   } catch (error) {
-    console.error("Error fetching session info:", error);
+    console.error("❌ Error fetching session info:", error);
     res.status(500).json({ message: "Failed to fetch session info", error: error.message });
   }
 });
@@ -1274,7 +1316,7 @@ router.post("/recording/start/:sessionId", verifyToken, async (req, res) => {
     await liveSession.save();
 
     // In a real implementation, you would call Agora Cloud Recording API here
-    console.log(`🎥 Recording started for session ${sessionId}`); // ✅ Fix this line if it has a typo
+    console.log(`🎥 Recording started for session ${sessionId}`);
 
     res.json({
       message: "Recording started successfully",
