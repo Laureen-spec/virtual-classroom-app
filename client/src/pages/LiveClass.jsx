@@ -39,6 +39,28 @@ export default function LiveClass() {
     console.log("💬 Chat messages length:", chatMessages.length);
   }, [chatMessages]);
 
+  // Add this function to handle audio track updates when permission is granted
+  const forceAudioUpdate = async () => {
+    try {
+      if (localTracks.audio && hasSpeakingPermission) {
+        console.log("🎯 Republishing audio track after permission grant");
+        
+        // Unpublish and republish audio track with new permissions
+        await client.unpublish(localTracks.audio);
+        
+        // Re-enable the audio track
+        localTracks.audio.setEnabled(true);
+        
+        // Republish the audio track
+        await client.publish(localTracks.audio);
+        
+        console.log("✅ Audio track republished successfully after permission grant");
+      }
+    } catch (error) {
+      console.error("❌ Error forcing audio update:", error);
+    }
+  };
+
   // Add this function to handle video track updates
   const forceVideoUpdate = async () => {
     try {
@@ -50,6 +72,57 @@ export default function LiveClass() {
       }
     } catch (error) {
       console.error("❌ Error forcing video update:", error);
+    }
+  };
+
+  // Debug audio state
+  useEffect(() => {
+    console.log("🎧 AUDIO STATE DEBUG:", {
+      isMuted,
+      hasSpeakingPermission,
+      audioTrackExists: !!localTracks.audio,
+      audioTrackEnabled: localTracks.audio?.enabled,
+      audioTrackPublished: localTracks.audio?.isPublished
+    });
+  }, [isMuted, hasSpeakingPermission, localTracks.audio]);
+
+  // Enhanced toggle mute function with permission handling
+  const toggleMute = async () => {
+    if (!localTracks.audio) return;
+
+    try {
+      if (isMuted) {
+        // Try to unmute
+        if (!hasSpeakingPermission) {
+          console.log("❌ No speaking permission - requesting...");
+          await requestSpeakingPermission();
+          return;
+        }
+        
+        console.log("🎯 Unmuting with permission...");
+        await API.put(`/live/self-unmute/${sessionId}`);
+        
+        // CRITICAL: Re-enable and republish audio track
+        localTracks.audio.setEnabled(true);
+        
+        // Ensure audio track is published
+        if (!localTracks.audio.isPublished) {
+          await client.publish(localTracks.audio);
+        }
+        
+        setIsMuted(false);
+        console.log("✅ Successfully unmuted");
+        
+      } else {
+        // Muting is always allowed
+        await API.put(`/live/self-mute/${sessionId}`);
+        localTracks.audio.setEnabled(false);
+        setIsMuted(true);
+        console.log("✅ Successfully muted");
+      }
+    } catch (err) {
+      console.error("❌ Toggle mute failed:", err);
+      alert(err.response?.data?.message || "Failed to toggle audio");
     }
   };
 
@@ -462,10 +535,14 @@ export default function LiveClass() {
             setHasSpeakingPermission(currentParticipant.hasSpeakingPermission);
             setIsHandRaised(currentParticipant.isHandRaised);
             
-            // CRITICAL: Force video update when permission is granted
+            // CRITICAL: Force audio and video update when permission is granted
             if (currentParticipant.hasSpeakingPermission && !hasSpeakingPermission) {
-              console.log("🎯 Speaking permission granted - forcing video update");
+              console.log("🎯 Speaking permission granted - forcing audio and video update");
+              setHasSpeakingPermission(true);
+              
+              // Force both audio and video updates
               setTimeout(() => {
+                forceAudioUpdate();
                 forceVideoUpdate();
               }, 1000);
             }
@@ -490,31 +567,6 @@ export default function LiveClass() {
       console.log("🛑 Clearing polling interval");
       clearInterval(interval);
     };
-  };
-
-  // Toggle mute/unmute
-  const toggleMute = async () => {
-    if (!localTracks.audio) return;
-
-    try {
-      if (isMuted) {
-        // Try to unmute
-        if (!hasSpeakingPermission) {
-          await requestSpeakingPermission();
-          return;
-        }
-        await API.put(`/live/self-unmute/${sessionId}`);
-        localTracks.audio.setEnabled(true);
-        setIsMuted(false);
-      } else {
-        await API.put(`/live/self-mute/${sessionId}`);
-        localTracks.audio.setEnabled(false);
-        setIsMuted(true);
-      }
-    } catch (err) {
-      console.error("Toggle mute failed:", err);
-      alert(err.response?.data?.message || "Failed to toggle audio");
-    }
   };
 
   // Raise/lower hand
@@ -855,6 +907,8 @@ export default function LiveClass() {
               <div>Joined: {joined ? "✅ YES" : "❌ NO"}</div>
               <div>Remote Users: {remoteUsers.length}</div>
               <div>Has Speaking Permission: {hasSpeakingPermission ? "✅ YES" : "❌ NO"}</div>
+              <div>Audio Track Enabled: {localTracks.audio?.enabled ? "✅ YES" : "❌ NO"}</div>
+              <div>Audio Track Published: {localTracks.audio?.isPublished ? "✅ YES" : "❌ NO"}</div>
             </div>
           </div>
 
@@ -961,9 +1015,14 @@ export default function LiveClass() {
                     <div key={participant.studentId} className="flex items-center justify-between bg-gray-700 p-2 rounded">
                       <div className="flex items-center space-x-2">
                         <span>{participant.name}</span>
-                        {participant.isHandRaised && <span className="text-yellow-400">✋</span>}
+                        {participant.isHandRaised && <span className="text-yellow-400 animate-pulse">✋</span>}
                         {participant.isMuted && <span className="text-red-400">🔇</span>}
-                        {participant.hasSpeakingPermission && <span className="text-green-400">🎤</span>}
+                        {participant.hasSpeakingPermission && (
+                          <span className="text-green-400" title="Can speak">🎤</span>
+                        )}
+                        {!participant.hasSpeakingPermission && participant.permissionRequested && (
+                          <span className="text-orange-400 animate-pulse" title="Permission requested">⏳</span>
+                        )}
                       </div>
                       <div className="flex space-x-1">
                         <button
@@ -980,6 +1039,14 @@ export default function LiveClass() {
                         >
                           Unmute
                         </button>
+                        {!participant.hasSpeakingPermission && (
+                          <button
+                            onClick={() => grantSpeakingPermission(participant.studentId)}
+                            className="bg-blue-600 hover:bg-blue-700 px-2 py-1 rounded text-xs"
+                          >
+                            Grant Mic
+                          </button>
+                        )}
                       </div>
                     </div>
                   ))}

@@ -448,7 +448,7 @@ router.post("/request-speaking/:sessionId", verifyToken, async (req, res) => {
   }
 });
 
-// 🔹 Grant Speaking Permission (Teacher only)
+// 🔹 Grant Speaking Permission (Teacher only) - ENHANCED AUDIO HANDLING
 router.put("/grant-speaking/:sessionId/:studentId", verifyToken, async (req, res) => {
   try {
     const { sessionId, studentId } = req.params;
@@ -472,9 +472,9 @@ router.put("/grant-speaking/:sessionId/:studentId", verifyToken, async (req, res
       return res.status(404).json({ message: "Student not found in this session" });
     }
 
-    // Grant speaking permission and unmute
+    // CRITICAL: Grant speaking permission and unmute
     liveSession.participants[participantIndex].hasSpeakingPermission = true;
-    liveSession.participants[participantIndex].isMuted = false;
+    liveSession.participants[participantIndex].isMuted = false; // Ensure unmuted
     liveSession.participants[participantIndex].permissionRequested = false;
 
     // Update permission request status
@@ -488,31 +488,36 @@ router.put("/grant-speaking/:sessionId/:studentId", verifyToken, async (req, res
       liveSession.permissionRequests[requestIndex].handledBy = req.user.id;
     }
 
-    // Add system message
+    // Add system message with explicit audio state
     const teacher = await User.findById(req.user.id);
     const student = await User.findById(studentId);
     liveSession.chatMessages.push({
       userId: req.user.id,
       userName: teacher.name,
-      message: `${teacher.name} granted speaking permission to ${student.name}`,
+      message: `${teacher.name} granted speaking permission to ${student.name} - Audio should now work`,
       messageType: "permission_granted",
       metadata: {
         studentId: studentId,
-        action: "grant_permission"
+        action: "grant_permission",
+        audioEnabled: true,
+        canSpeak: true
       }
     });
 
     await liveSession.save();
 
+    console.log(`✅ Speaking permission granted to ${studentId} - Audio unmuted`);
+
     res.json({
-      message: "Speaking permission granted successfully",
+      message: "Speaking permission granted successfully - Student can now speak",
       studentId,
       hasSpeakingPermission: true,
-      isMuted: false
+      isMuted: false,
+      audioState: "enabled"
     });
 
   } catch (error) {
-    console.error("Error granting speaking permission:", error);
+    console.error("❌ Error granting speaking permission:", error);
     res.status(500).json({ message: "Failed to grant speaking permission", error: error.message });
   }
 });
