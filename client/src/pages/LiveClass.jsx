@@ -33,6 +33,12 @@ export default function LiveClass() {
   const client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
   const chatContainerRef = useRef(null);
 
+  // Debug useEffect to monitor chat state
+  useEffect(() => {
+    console.log("💬 Chat messages updated:", chatMessages);
+    console.log("💬 Chat messages length:", chatMessages.length);
+  }, [chatMessages]);
+
   // Start Screen Sharing
   const startScreenShare = async () => {
     try {
@@ -312,13 +318,17 @@ export default function LiveClass() {
     }
   };
 
-  // Poll for session updates
+  // ✅ FIXED: Poll for session updates with proper chat handling
   const startSessionPolling = () => {
     const interval = setInterval(async () => {
       if (!sessionId) return;
       try {
         const response = await API.get(`/live/session/${sessionId}`);
+        console.log("🔍 Full session response:", response.data); // Debug log
+        
         const { participants, chatMessages, permissionRequests, isActive } = response.data;
+
+        console.log("📨 Polling - Chat messages:", chatMessages); // Debug log
 
         // Only check if class is active - don't auto-redirect
         if (!isActive) {
@@ -327,7 +337,15 @@ export default function LiveClass() {
         }
         
         setParticipants(participants);
-        setChatMessages(chatMessages);
+        
+        // ✅ FIX: Properly set chat messages - ensure it's always an array
+        if (chatMessages && Array.isArray(chatMessages)) {
+          setChatMessages(chatMessages);
+        } else {
+          console.warn("⚠️ Chat messages is not an array, setting to empty array");
+          setChatMessages([]); // Fallback to empty array
+        }
+        
         if (isTeacher) {
           setPendingRequests(permissionRequests.filter(req => req.status === "pending"));
         }
@@ -778,6 +796,9 @@ export default function LiveClass() {
         <div className="w-80 bg-gray-800 flex flex-col">
           <div className="p-4 border-b border-gray-700">
             <h3 className="font-semibold">Chat</h3>
+            <div className="text-xs text-gray-400 mt-1">
+              {chatMessages.length} messages
+            </div>
           </div>
           
           {/* Chat Messages */}
@@ -785,22 +806,29 @@ export default function LiveClass() {
             ref={chatContainerRef}
             className="flex-1 p-4 overflow-y-auto space-y-3"
           >
-            {chatMessages.map((message, index) => (
-              <div key={index} className={`p-2 rounded ${
-                message.messageType === "system" ? "bg-blue-600 bg-opacity-20" :
-                message.messageType === "permission_granted" ? "bg-green-600 bg-opacity-20" :
-                message.messageType === "permission_revoked" ? "bg-red-600 bg-opacity-20" :
-                "bg-gray-700"
-              }`}>
-                <div className="flex justify-between items-start">
-                  <span className="font-semibold text-sm">{message.userName}</span>
-                  <span className="text-xs text-gray-400">
-                    {new Date(message.timestamp).toLocaleTimeString()}
-                  </span>
-                </div>
-                <p className="text-sm mt-1">{message.message}</p>
+            {chatMessages.length === 0 ? (
+              <div className="text-center text-gray-500 py-8">
+                <p>No messages yet</p>
+                <p className="text-xs mt-1">Start the conversation!</p>
               </div>
-            ))}
+            ) : (
+              chatMessages.map((message, index) => (
+                <div key={index} className={`p-2 rounded ${
+                  message.messageType === "system" ? "bg-blue-600 bg-opacity-20" :
+                  message.messageType === "permission_granted" ? "bg-green-600 bg-opacity-20" :
+                  message.messageType === "permission_revoked" ? "bg-red-600 bg-opacity-20" :
+                  "bg-gray-700"
+                }`}>
+                  <div className="flex justify-between items-start">
+                    <span className="font-semibold text-sm">{message.userName}</span>
+                    <span className="text-xs text-gray-400">
+                      {new Date(message.timestamp).toLocaleTimeString()}
+                    </span>
+                  </div>
+                  <p className="text-sm mt-1">{message.message}</p>
+                </div>
+              ))
+            )}
           </div>
 
           {/* Message Input */}
