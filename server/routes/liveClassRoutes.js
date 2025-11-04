@@ -1,6 +1,5 @@
 import express from "express";
 import { verifyToken } from "../middleware/authMiddleware.js";
-import { checkSubscription } from "../middleware/subscriptionMiddleware.js";
 import LiveSession from "../models/LiveSession.js";
 import ClassSchedule from "../models/ClassSchedule.js";
 import User from "../models/User.js";
@@ -137,9 +136,8 @@ router.get("/teacher-session/:classId", verifyToken, async (req, res) => {
   }
 });
 
-// 🔹 Join a live class (Student/Teacher) - WITHOUT SUBSCRIPTION CHECK
+// 🔹 Join a live class (Student/Teacher/Admin) - WITHOUT SUBSCRIPTION CHECK
 router.post("/join/:sessionId", verifyToken, async (req, res) => {
-  // REMOVED: checkSubscription middleware to allow free access
   try {
     const { sessionId } = req.params;
     
@@ -170,16 +168,24 @@ router.post("/join/:sessionId", verifyToken, async (req, res) => {
     );
 
     let role = RtcRole.SUBSCRIBER;
-    let isMuted = liveSession.settings.autoMuteNewStudents; // Respect auto-mute setting
+    let isMuted = liveSession.settings.autoMuteNewStudents;
     let hasSpeakingPermission = false;
 
+    // ✅ FIX: Handle ADMIN role properly
+    // Admin joins as publisher (host privileges)
+    if (req.user.role === "admin") {
+      role = RtcRole.PUBLISHER;
+      isMuted = false;
+      hasSpeakingPermission = true;
+      console.log("🔧 ADMIN joining with host privileges");
+    }
     // Teacher joins as host
-    if (req.user.role === "teacher" && liveSession.teacherId._id.toString() === req.user.id) {
+    else if (req.user.role === "teacher" && liveSession.teacherId._id.toString() === req.user.id) {
       role = RtcRole.PUBLISHER;
       isMuted = false;
       hasSpeakingPermission = true;
       
-      // ADD THIS: Reset leftAt time when teacher rejoins
+      // Reset leftAt time when teacher rejoins
       if (existingParticipant && existingParticipant.leftAt) {
         existingParticipant.leftAt = null;
         existingParticipant.lastJoinTime = new Date();
@@ -199,7 +205,7 @@ router.post("/join/:sessionId", verifyToken, async (req, res) => {
     if (!existingParticipant) {
       liveSession.participants.push({
         studentId: req.user.id,
-        role: req.user.role === "teacher" ? "host" : "audience",
+        role: req.user.role === "teacher" || req.user.role === "admin" ? "host" : "audience",
         isMuted,
         isHandRaised: false,
         hasSpeakingPermission,
@@ -208,6 +214,12 @@ router.post("/join/:sessionId", verifyToken, async (req, res) => {
       });
     } else {
       existingParticipant.lastJoinTime = new Date();
+      // ✅ Update role for admin if they rejoined
+      if (req.user.role === "admin") {
+        existingParticipant.role = "host";
+        existingParticipant.hasSpeakingPermission = true;
+        existingParticipant.isMuted = false;
+      }
     }
 
     await liveSession.save();
@@ -215,11 +227,11 @@ router.post("/join/:sessionId", verifyToken, async (req, res) => {
     // Generate Agora token
     const token = generateAgoraToken(liveSession.channelName, 0, role);
 
-    console.log("✅ User joined live class - FREE ACCESS - Token generated:", token ? "YES" : "NO");
+    console.log(`✅ ${req.user.role.toUpperCase()} joined live class - Token generated:`, token ? "YES" : "NO");
 
     // Prepare response data
     const responseData = {
-      message: "Joined live class successfully - FREE ACCESS",
+      message: `${req.user.role.charAt(0).toUpperCase() + req.user.role.slice(1)} joined live class successfully`,
       session: {
         id: liveSession._id,
         channelName: liveSession.channelName,
@@ -234,13 +246,11 @@ router.post("/join/:sessionId", verifyToken, async (req, res) => {
         isMuted,
         hasSpeakingPermission,
         canSelfUnmute: hasSpeakingPermission && !isMuted,
-        role: req.user.role === "teacher" ? "host" : "audience"
+        role: req.user.role === "teacher" || req.user.role === "admin" ? "host" : "audience"
       },
       token,
       appId: process.env.VITE_AGORA_APP_ID,
-      // Add free access notice
-      accessType: "free",
-      note: "Free access enabled - no subscription required"
+      accessType: "free"
     };
 
     res.json(responseData);
@@ -307,8 +317,8 @@ router.post("/request-speaking/:sessionId", verifyToken, async (req, res) => {
     }
 
     // Check if user is a student
-    if (req.user.role === "teacher") {
-      return res.status(400).json({ message: "Teachers don't need to request speaking permission" });
+    if (req.user.role === "teacher" || req.user.role === "admin") {
+      return res.status(400).json({ message: "Teachers and admins don't need to request speaking permission" });
     }
 
     // Find participant

@@ -12,7 +12,7 @@ export default function LiveClass() {
   const [sessionInfo, setSessionInfo] = useState(null);
   const [participantInfo, setParticipantInfo] = useState(null);
   const [isMuted, setIsMuted] = useState(true);
-  const [isVideoOn, setIsVideoOn] = useState(true); // ADDED: Video state
+  const [isVideoOn, setIsVideoOn] = useState(true);
   const [isHandRaised, setIsHandRaised] = useState(false);
   const [hasSpeakingPermission, setHasSpeakingPermission] = useState(false);
   const [chatMessages, setChatMessages] = useState([]);
@@ -21,19 +21,17 @@ export default function LiveClass() {
   const [isTeacher, setIsTeacher] = useState(false);
   const [pendingRequests, setPendingRequests] = useState([]);
 
-  // ADD THIS: Screen sharing state variables
+  // Screen sharing state variables
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [screenShareTrack, setScreenShareTrack] = useState(null);
 
-  // ADD THESE RECORDING STATE VARIABLES
+  // Recording state variables
   const [isRecording, setIsRecording] = useState(false);
   const [recordingStatus, setRecordingStatus] = useState(null);
 
   const appId = import.meta.env.VITE_AGORA_APP_ID;
   const client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
   const chatContainerRef = useRef(null);
-
-  // ADD THESE SCREEN SHARING FUNCTIONS:
 
   // Start Screen Sharing
   const startScreenShare = async () => {
@@ -123,7 +121,7 @@ export default function LiveClass() {
     }
   };
 
-  // Toggle Video On/Off - UPDATED
+  // Toggle Video On/Off
   const toggleVideo = async () => {
     try {
       if (!localTracks.video) return;
@@ -138,7 +136,7 @@ export default function LiveClass() {
     }
   };
 
-  // End Live Class - ADDED (Teacher only)
+  // End Live Class (Teacher only)
   const endLiveClass = async () => {
     if (!window.confirm("Are you sure you want to end this live class for everyone?")) return;
 
@@ -160,7 +158,7 @@ export default function LiveClass() {
     }
   };
 
-  // ADD THESE RECORDING FUNCTIONS
+  // Recording functions
   const startRecording = async () => {
     try {
       if (!isTeacher) {
@@ -205,7 +203,7 @@ export default function LiveClass() {
     }
   };
 
-  // Add this to your polling function to update recording status
+  // Update recording status
   const updateRecordingStatus = async () => {
     try {
       const response = await API.get(`/live/recording/status/${sessionId}`);
@@ -216,32 +214,51 @@ export default function LiveClass() {
     }
   };
 
-  // Fetch session info and join class
+  // UPDATED: Fetch session info and join class with better error handling and admin support
   const joinClass = async () => {
     try {
+      console.log("🔄 Attempting to join class...");
+      console.log("📋 Session ID:", sessionId);
+      console.log("👤 User Role:", localStorage.getItem("role"));
+      console.log("🔑 User ID:", localStorage.getItem("userId"));
+      
+      // Check if token exists
+      const token = localStorage.getItem("token");
+      if (!token) {
+        console.error("❌ No authentication token found");
+        alert("Please log in again");
+        navigate("/register");
+        return;
+      }
+
       // Join the live session via backend
       const joinResponse = await API.post(`/live/join/${sessionId}`);
-      const { session, token, participantInfo } = joinResponse.data;
+      console.log("✅ Join response:", joinResponse.data);
+      
+      const { session, token: agoraToken, participantInfo } = joinResponse.data;
       
       setSessionInfo(session);
       setParticipantInfo(participantInfo);
       setIsMuted(participantInfo.isMuted);
       setHasSpeakingPermission(participantInfo.hasSpeakingPermission);
-      // FIX: Changed from "teacher" to "host" for role detection
-      setIsTeacher(participantInfo.role === "host" || participantInfo.role === "admin");
-      // FIX: Set initial video state from participantInfo
+      
+      // ✅ FIX: Handle admin role detection properly
+      const userRole = localStorage.getItem("role");
+      setIsTeacher(participantInfo.role === "host" || userRole === "admin");
+      
       setIsVideoOn(participantInfo.videoOn || true);
-      // ADD THIS: Set initial screen sharing state
       setIsScreenSharing(participantInfo.isScreenSharing || false);
 
-      // ADD THIS: Check if teacher is rejoining
+      console.log("🎯 User is teacher:", participantInfo.role === "host" || userRole === "admin");
+      console.log("🎯 Participant role:", participantInfo.role);
+
+      // Check if teacher is rejoining
       if (isTeacher && participantInfo.role === "host") {
         console.log("Teacher rejoining live session");
-        // You can add specific logic for teacher rejoins here
       }
 
       // Join Agora channel
-      const uid = await client.join(appId, session.channelName, token, null);
+      const uid = await client.join(appId, session.channelName, agoraToken, null);
 
       // Create local tracks
       const [audioTrack, videoTrack] = await AgoraRTC.createMicrophoneAndCameraTracks();
@@ -278,8 +295,15 @@ export default function LiveClass() {
       startSessionPolling();
 
     } catch (err) {
-      console.error("Join failed:", err);
-      alert("Failed to join class: " + (err.response?.data?.message || err.message));
+      console.error("❌ Join failed:", err);
+      console.error("❌ Error response:", err.response?.data);
+      
+      if (err.response?.status === 401) {
+        alert("Authentication failed. Please log in again.");
+        navigate("/register");
+      } else {
+        alert("Failed to join class: " + (err.response?.data?.message || err.message));
+      }
     }
   };
 
@@ -309,13 +333,13 @@ export default function LiveClass() {
           setIsMuted(currentParticipant.isMuted);
           setHasSpeakingPermission(currentParticipant.hasSpeakingPermission);
           setIsHandRaised(currentParticipant.isHandRaised);
-          // ADD THIS: Update screen sharing state
+          // Update screen sharing state
           if (isTeacher) {
             setIsScreenSharing(currentParticipant.isScreenSharing || false);
           }
         }
 
-        // ADD THIS: Update recording status in polling
+        // Update recording status in polling
         await updateRecordingStatus();
 
       } catch (err) {
@@ -504,7 +528,7 @@ export default function LiveClass() {
         </div>
         
         <div className="flex items-center space-x-4">
-          {/* ADD THIS: Recording Indicator for all participants */}
+          {/* Recording Indicator for all participants */}
           {isRecording && (
             <div className="bg-red-600 text-white px-3 py-1 rounded-full text-sm flex items-center">
               <span className="animate-pulse mr-2">🔴</span>
@@ -512,7 +536,7 @@ export default function LiveClass() {
             </div>
           )}
 
-          {/* ADD THIS: Screen Share Button for Teachers */}
+          {/* Screen Share Button for Teachers */}
           {isTeacher && (
             <button
               onClick={toggleScreenShare}
@@ -527,7 +551,7 @@ export default function LiveClass() {
             </button>
           )}
 
-          {/* Video Controls - ADDED */}
+          {/* Video Controls */}
           <button
             onClick={toggleVideo}
             className={`p-3 rounded-full ${
@@ -590,7 +614,7 @@ export default function LiveClass() {
         {/* Video Grid - Left Side */}
         <div className="flex-1 p-4">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {/* UPDATE THIS: Local Video with Screen Sharing Indicator */}
+            {/* Local Video with Screen Sharing Indicator */}
             <div className="bg-black rounded-lg overflow-hidden relative">
               <div id="local-player" className="w-full h-48"></div>
               <div className="absolute bottom-2 left-2 bg-black bg-opacity-50 px-2 py-1 rounded text-sm">
@@ -619,7 +643,7 @@ export default function LiveClass() {
             <div className="mt-6 bg-gray-800 p-4 rounded-lg">
               <h3 className="text-lg font-semibold mb-3">Teacher Controls</h3>
               
-              {/* ADD THIS: Recording Controls */}
+              {/* Recording Controls */}
               <div className="mb-4 p-3 bg-red-600 bg-opacity-20 rounded">
                 <div className="flex items-center justify-between">
                   <div>
@@ -643,7 +667,7 @@ export default function LiveClass() {
                 </div>
               </div>
               
-              {/* ADD THIS: Screen Sharing Status */}
+              {/* Screen Sharing Status */}
               <div className="mb-4 p-3 bg-purple-600 bg-opacity-20 rounded">
                 <div className="flex items-center justify-between">
                   <span className="font-semibold">Screen Sharing: {isScreenSharing ? "ACTIVE" : "INACTIVE"}</span>
@@ -674,7 +698,7 @@ export default function LiveClass() {
                 >
                   Unmute All
                 </button>
-                {/* End Live Class - ADDED */}
+                {/* End Live Class */}
                 <button
                   onClick={endLiveClass}
                   className="bg-orange-600 hover:bg-orange-700 px-3 py-2 rounded text-sm"
