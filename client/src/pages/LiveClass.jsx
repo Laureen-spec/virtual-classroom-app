@@ -214,7 +214,7 @@ export default function LiveClass() {
     }
   };
 
-  // IMPROVED: Fetch session info and join class with better error handling and admin support
+  // UPDATED: Fetch session info and join class with simplified auth check
   const joinClass = async () => {
     try {
       console.log("🔄 Attempting to join class...");
@@ -222,19 +222,17 @@ export default function LiveClass() {
       console.log("👤 User Role:", localStorage.getItem("role"));
       console.log("🔑 User ID:", localStorage.getItem("userId"));
       
-      // ✅ IMPROVED AUTHENTICATION CHECK
+      // ✅ SIMPLIFIED AUTH CHECK - Only check token
       const token = localStorage.getItem("token");
-      const userRole = localStorage.getItem("role");
-      const userId = localStorage.getItem("userId");
       
-      if (!token || !userId) {
-        console.error("❌ Missing authentication data");
+      if (!token) {
+        console.error("❌ No authentication token found");
         alert("Please log in again");
         navigate("/register");
         return;
       }
 
-      console.log("✅ Authentication data present");
+      console.log("✅ Authentication token present");
 
       // Join the live session via backend
       const joinResponse = await API.post(`/live/join/${sessionId}`);
@@ -248,6 +246,7 @@ export default function LiveClass() {
       setHasSpeakingPermission(participantInfo.hasSpeakingPermission);
       
       // ✅ IMPROVED ROLE DETECTION
+      const userRole = localStorage.getItem("role");
       const isUserTeacher = participantInfo.role === "host" || userRole === "teacher" || userRole === "admin";
       setIsTeacher(isUserTeacher);
       

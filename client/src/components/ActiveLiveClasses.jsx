@@ -51,20 +51,18 @@ export default function ActiveLiveClasses() {
 
   const joinSession = async (sessionId) => {
     try {
-      // ✅ IMPROVED: Check if user is authenticated with debugging
+      // ✅ SIMPLIFIED AUTH CHECK - Only check token
       const token = localStorage.getItem("token");
-      const userRole = localStorage.getItem("role");
-      const userId = localStorage.getItem("userId");
       
       console.log("🔄 Join session attempt:", {
         sessionId,
-        userRole,
-        userId,
+        userRole: localStorage.getItem("role"),
+        userId: localStorage.getItem("userId"),
         hasToken: !!token
       });
 
-      if (!token || !userId) {
-        console.error("❌ Missing authentication data - redirecting to login");
+      if (!token) {
+        console.error("❌ No token found - redirecting to login");
         alert("Please log in again to join the live class");
         navigate("/register");
         return;
@@ -72,32 +70,9 @@ export default function ActiveLiveClasses() {
 
       console.log("✅ User authenticated, proceeding to join session");
       
-      // ✅ ALLOW ALL AUTHENTICATED USERS TO JOIN WITHOUT SUBSCRIPTION CHECK
+      // ✅ ALLOW ALL AUTHENTICATED USERS TO JOIN
       navigate(`/class/${sessionId}`);
       
-      /* COMMENT OUT THE ORIGINAL SUBSCRIPTION CHECK:
-      const userRole = localStorage.getItem("role");
-      
-      // Teachers and admins can join directly without subscription check
-      if (userRole === "teacher" || userRole === "admin") {
-        navigate(`/class/${sessionId}`);
-        return;
-      }
-
-      // For students, check subscription status
-      if (userRole === "student") {
-        if (!subscriptionStatus) {
-          // Show subscription required message
-          if (window.confirm("❌ Active subscription required to join live classes. Would you like to subscribe now?")) {
-            navigate("/subscribe");
-          }
-          return;
-        }
-        
-        // Student has active subscription, proceed to join
-        navigate(`/class/${sessionId}`);
-      }
-      */
     } catch (err) {
       console.error("Join session error:", err);
       alert("Failed to join session. Please try again.");
