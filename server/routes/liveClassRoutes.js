@@ -453,6 +453,13 @@ router.put("/grant-speaking/:sessionId/:studentId", verifyToken, async (req, res
   try {
     const { sessionId, studentId } = req.params;
 
+    // ✅ ADDED DEBUG LINE TO VERIFY ENDPOINT IS BEING CALLED
+    console.log("🎯 GRANT SPEAKING PERMISSION - Backend called:", {
+      sessionId,
+      studentId,
+      teacherId: req.user.id
+    });
+
     const liveSession = await LiveSession.findById(sessionId);
     if (!liveSession) {
       return res.status(404).json({ message: "Live session not found" });

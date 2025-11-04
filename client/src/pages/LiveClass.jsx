@@ -86,13 +86,16 @@ export default function LiveClass() {
     });
   }, [isMuted, hasSpeakingPermission, localTracks.audio]);
 
-  // Enhanced toggle mute function with permission handling
+  // Enhanced toggle mute function
   const toggleMute = async () => {
-    if (!localTracks.audio) return;
+    if (!localTracks.audio) {
+      console.error("❌ No audio track available");
+      return;
+    }
 
     try {
       if (isMuted) {
-        // Try to unmute
+        // Try to unmute - check if we have permission
         if (!hasSpeakingPermission) {
           console.log("❌ No speaking permission - requesting...");
           await requestSpeakingPermission();
@@ -101,15 +104,7 @@ export default function LiveClass() {
         
         console.log("🎯 Unmuting with permission...");
         await API.put(`/live/self-unmute/${sessionId}`);
-        
-        // CRITICAL: Re-enable and republish audio track
         localTracks.audio.setEnabled(true);
-        
-        // Ensure audio track is published
-        if (!localTracks.audio.isPublished) {
-          await client.publish(localTracks.audio);
-        }
-        
         setIsMuted(false);
         console.log("✅ Successfully unmuted");
         
@@ -285,7 +280,7 @@ export default function LiveClass() {
     }
   };
 
-  // UPDATED: Fetch session info and join class with simplified auth check
+  // UPDATED: Fetch session info and join class with proper microphone permission
   const joinClass = async () => {
     try {
       console.log("🔄 Attempting to join class...");
@@ -304,6 +299,22 @@ export default function LiveClass() {
       }
 
       console.log("✅ Authentication token present");
+
+      // ✅ CRITICAL FIX: Request microphone permission BEFORE joining
+      try {
+        console.log("🎤 Requesting microphone permission...");
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+          audio: true, 
+          video: true 
+        });
+        console.log("✅ Microphone and camera access granted");
+        // Stop the tracks immediately since we'll create proper ones with Agora
+        stream.getTracks().forEach(track => track.stop());
+      } catch (err) {
+        console.error("❌ Microphone/camera permission denied:", err);
+        alert("Microphone and camera access is required to join the live class. Please allow permissions and try again.");
+        return;
+      }
 
       // Join the live session via backend
       const joinResponse = await API.post(`/live/join/${sessionId}`);
@@ -333,18 +344,30 @@ export default function LiveClass() {
       // Join Agora channel
       const uid = await client.join(appId, session.channelName, agoraToken, null);
 
-      // Create local tracks
-      const [audioTrack, videoTrack] = await AgoraRTC.createMicrophoneAndCameraTracks();
+      // Create local tracks with proper error handling
+      console.log("🎤 Creating microphone and camera tracks...");
+      const [audioTrack, videoTrack] = await AgoraRTC.createMicrophoneAndCameraTracks({}, {});
       
+      console.log("✅ Tracks created:", {
+        audioEnabled: audioTrack.enabled,
+        videoEnabled: videoTrack.enabled,
+        audioPublished: audioTrack.isPublished,
+        videoPublished: videoTrack.isPublished
+      });
+
       // Apply initial mute state
       if (participantInfo.isMuted) {
         audioTrack.setEnabled(false);
+        console.log("🔇 Audio track initially muted");
+      } else {
+        audioTrack.setEnabled(true);
+        console.log("🔊 Audio track initially enabled");
       }
 
       setLocalTracks({ audio: audioTrack, video: videoTrack });
       videoTrack.play("local-player");
 
-      // ENHANCED: Setup remote user handling with enhanced video/audio tracking
+      // Setup remote user handling
       client.on("user-published", async (user, mediaType) => {
         console.log("🔍 User published:", user.uid, "Media type:", mediaType);
         
@@ -353,14 +376,11 @@ export default function LiveClass() {
           console.log("✅ Subscribed to user:", user.uid, "for", mediaType);
           
           if (mediaType === "video") {
-            // Wait a bit for the DOM element to be ready
             setTimeout(() => {
               const playerElement = document.getElementById(`remote-${user.uid}`);
               if (playerElement && user.videoTrack) {
                 console.log("🎥 Playing video for user:", user.uid);
                 user.videoTrack.play(`remote-${user.uid}`);
-              } else {
-                console.warn("⚠️ Video player element not found for user:", user.uid);
               }
             }, 100);
           }
@@ -372,7 +392,6 @@ export default function LiveClass() {
             }
           }
           
-          // Update remote users state
           setRemoteUsers((prev) => {
             const existingUser = prev.find(u => u.uid === user.uid);
             if (existingUser) {
@@ -390,26 +409,15 @@ export default function LiveClass() {
       client.on("user-unpublished", (user, mediaType) => {
         console.log("🔍 User unpublished:", user.uid, "Media type:", mediaType);
         
-        if (mediaType === "video") {
-          // Stop the video track when unpublished
-          if (user.videoTrack) {
-            user.videoTrack.stop();
-          }
+        if (mediaType === "video" && user.videoTrack) {
+          user.videoTrack.stop();
         }
         
-        if (mediaType === "audio") {
-          // Stop the audio track when unpublished
-          if (user.audioTrack) {
-            user.audioTrack.stop();
-          }
+        if (mediaType === "audio" && user.audioTrack) {
+          user.audioTrack.stop();
         }
         
-        // Only remove from state if both audio and video are unpublished
-        setRemoteUsers((prev) => {
-          const updatedUsers = prev.filter((u) => u.uid !== user.uid);
-          console.log("📊 Remote users after removal:", updatedUsers.length);
-          return updatedUsers;
-        });
+        setRemoteUsers((prev) => prev.filter((u) => u.uid !== user.uid));
       });
 
       // Add user-joined event to handle new participants
@@ -423,7 +431,10 @@ export default function LiveClass() {
       });
 
       // Publish tracks
+      console.log("📡 Publishing audio and video tracks...");
       await client.publish([audioTrack, videoTrack]);
+      console.log("✅ Tracks published successfully");
+      
       setJoined(true);
 
       // Start polling for session updates
@@ -519,7 +530,7 @@ export default function LiveClass() {
           console.log("📋 Pending requests:", pending.length);
         }
 
-        // ENHANCED: Update local state based on participant info with video tracking
+        // ENHANCED: Update local state based on participant info with proper audio handling
         const currentUserId = localStorage.getItem("userId");
         if (participants && currentUserId) {
           const currentParticipant = participants.find(p => p.studentId === currentUserId);
@@ -527,25 +538,42 @@ export default function LiveClass() {
             console.log("👤 Updating participant state:", {
               isMuted: currentParticipant.isMuted,
               hasPermission: currentParticipant.hasSpeakingPermission,
-              handRaised: currentParticipant.isHandRaised,
-              videoOn: currentParticipant.videoOn // Add this line
+              handRaised: currentParticipant.isHandRaised
             });
             
-            setIsMuted(currentParticipant.isMuted);
-            setHasSpeakingPermission(currentParticipant.hasSpeakingPermission);
-            setIsHandRaised(currentParticipant.isHandRaised);
-            
-            // CRITICAL: Force audio and video update when permission is granted
-            if (currentParticipant.hasSpeakingPermission && !hasSpeakingPermission) {
-              console.log("🎯 Speaking permission granted - forcing audio and video update");
-              setHasSpeakingPermission(true);
-              
-              // Force both audio and video updates
-              setTimeout(() => {
-                forceAudioUpdate();
-                forceVideoUpdate();
-              }, 1000);
+            // Update mute state
+            if (currentParticipant.isMuted !== isMuted) {
+              setIsMuted(currentParticipant.isMuted);
+              if (localTracks.audio) {
+                localTracks.audio.setEnabled(!currentParticipant.isMuted);
+                console.log(`🔊 Audio track ${currentParticipant.isMuted ? 'muted' : 'unmuted'}`);
+              }
             }
+            
+            // Update speaking permission
+            if (currentParticipant.hasSpeakingPermission !== hasSpeakingPermission) {
+              setHasSpeakingPermission(currentParticipant.hasSpeakingPermission);
+              console.log(`🎤 Speaking permission ${currentParticipant.hasSpeakingPermission ? 'granted' : 'revoked'}`);
+              
+              // CRITICAL: When permission is granted, ensure audio is enabled
+              if (currentParticipant.hasSpeakingPermission && localTracks.audio) {
+                console.log("🎯 Permission granted - enabling audio track");
+                localTracks.audio.setEnabled(true);
+                
+                // Republish audio track to ensure it's active
+                setTimeout(async () => {
+                  try {
+                    await client.unpublish(localTracks.audio);
+                    await client.publish(localTracks.audio);
+                    console.log("✅ Audio track republished after permission grant");
+                  } catch (error) {
+                    console.error("❌ Error republishing audio:", error);
+                  }
+                }, 500);
+              }
+            }
+            
+            setIsHandRaised(currentParticipant.isHandRaised);
             
             // Update screen sharing state for teacher
             if (userPermissions?.isTeacher) {
