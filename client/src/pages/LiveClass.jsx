@@ -39,6 +39,20 @@ export default function LiveClass() {
     console.log("💬 Chat messages length:", chatMessages.length);
   }, [chatMessages]);
 
+  // Add this function to handle video track updates
+  const forceVideoUpdate = async () => {
+    try {
+      if (localTracks.video && hasSpeakingPermission) {
+        // Republish video track to ensure it's available to others
+        await client.unpublish(localTracks.video);
+        await client.publish(localTracks.video);
+        console.log("✅ Video track republished after permission grant");
+      }
+    } catch (error) {
+      console.error("❌ Error forcing video update:", error);
+    }
+  };
+
   // Start Screen Sharing
   const startScreenShare = async () => {
     try {
@@ -257,19 +271,81 @@ export default function LiveClass() {
       setLocalTracks({ audio: audioTrack, video: videoTrack });
       videoTrack.play("local-player");
 
-      // Setup remote user handling
+      // ENHANCED: Setup remote user handling with enhanced video/audio tracking
       client.on("user-published", async (user, mediaType) => {
-        await client.subscribe(user, mediaType);
-        if (mediaType === "video") {
-          user.videoTrack.play(`remote-${user.uid}`);
+        console.log("🔍 User published:", user.uid, "Media type:", mediaType);
+        
+        try {
+          await client.subscribe(user, mediaType);
+          console.log("✅ Subscribed to user:", user.uid, "for", mediaType);
+          
+          if (mediaType === "video") {
+            // Wait a bit for the DOM element to be ready
+            setTimeout(() => {
+              const playerElement = document.getElementById(`remote-${user.uid}`);
+              if (playerElement && user.videoTrack) {
+                console.log("🎥 Playing video for user:", user.uid);
+                user.videoTrack.play(`remote-${user.uid}`);
+              } else {
+                console.warn("⚠️ Video player element not found for user:", user.uid);
+              }
+            }, 100);
+          }
+          
+          if (mediaType === "audio") {
+            if (user.audioTrack) {
+              user.audioTrack.play();
+              console.log("🔊 Playing audio for user:", user.uid);
+            }
+          }
+          
+          // Update remote users state
+          setRemoteUsers((prev) => {
+            const existingUser = prev.find(u => u.uid === user.uid);
+            if (existingUser) {
+              return prev.map(u => u.uid === user.uid ? user : u);
+            } else {
+              return [...prev, user];
+            }
+          });
+          
+        } catch (error) {
+          console.error("❌ Error subscribing to user:", error);
         }
-        if (mediaType === "audio") {
-          user.audioTrack.play();
-        }
-        setRemoteUsers((prev) => [...prev, user]);
       });
 
-      client.on("user-unpublished", (user) => {
+      client.on("user-unpublished", (user, mediaType) => {
+        console.log("🔍 User unpublished:", user.uid, "Media type:", mediaType);
+        
+        if (mediaType === "video") {
+          // Stop the video track when unpublished
+          if (user.videoTrack) {
+            user.videoTrack.stop();
+          }
+        }
+        
+        if (mediaType === "audio") {
+          // Stop the audio track when unpublished
+          if (user.audioTrack) {
+            user.audioTrack.stop();
+          }
+        }
+        
+        // Only remove from state if both audio and video are unpublished
+        setRemoteUsers((prev) => {
+          const updatedUsers = prev.filter((u) => u.uid !== user.uid);
+          console.log("📊 Remote users after removal:", updatedUsers.length);
+          return updatedUsers;
+        });
+      });
+
+      // Add user-joined event to handle new participants
+      client.on("user-joined", (user) => {
+        console.log("🎉 User joined:", user.uid);
+      });
+
+      client.on("user-left", (user) => {
+        console.log("👋 User left:", user.uid);
         setRemoteUsers((prev) => prev.filter((u) => u.uid !== user.uid));
       });
 
@@ -370,7 +446,7 @@ export default function LiveClass() {
           console.log("📋 Pending requests:", pending.length);
         }
 
-        // Update local state based on participant info
+        // ENHANCED: Update local state based on participant info with video tracking
         const currentUserId = localStorage.getItem("userId");
         if (participants && currentUserId) {
           const currentParticipant = participants.find(p => p.studentId === currentUserId);
@@ -378,12 +454,21 @@ export default function LiveClass() {
             console.log("👤 Updating participant state:", {
               isMuted: currentParticipant.isMuted,
               hasPermission: currentParticipant.hasSpeakingPermission,
-              handRaised: currentParticipant.isHandRaised
+              handRaised: currentParticipant.isHandRaised,
+              videoOn: currentParticipant.videoOn // Add this line
             });
             
             setIsMuted(currentParticipant.isMuted);
             setHasSpeakingPermission(currentParticipant.hasSpeakingPermission);
             setIsHandRaised(currentParticipant.isHandRaised);
+            
+            // CRITICAL: Force video update when permission is granted
+            if (currentParticipant.hasSpeakingPermission && !hasSpeakingPermission) {
+              console.log("🎯 Speaking permission granted - forcing video update");
+              setTimeout(() => {
+                forceVideoUpdate();
+              }, 1000);
+            }
             
             // Update screen sharing state for teacher
             if (userPermissions?.isTeacher) {
@@ -727,12 +812,31 @@ export default function LiveClass() {
               )}
             </div>
 
-            {/* Remote Videos */}
+            {/* ENHANCED: Remote Videos with better loading states */}
             {remoteUsers.map((user) => (
               <div key={user.uid} className="bg-black rounded-lg overflow-hidden relative">
-                <div id={`remote-${user.uid}`} className="w-full h-48"></div>
+                <div 
+                  id={`remote-${user.uid}`} 
+                  className="w-full h-48 remote-video-container"
+                  style={{ 
+                    background: '#000',
+                    minHeight: '192px'
+                  }}
+                >
+                  {/* Add a loading indicator */}
+                  <div className="absolute inset-0 flex items-center justify-center text-white">
+                    <div className="text-center">
+                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white mx-auto mb-2"></div>
+                      <span className="text-sm">Loading video...</span>
+                    </div>
+                  </div>
+                </div>
                 <div className="absolute bottom-2 left-2 bg-black bg-opacity-50 px-2 py-1 rounded text-sm">
                   User {user.uid}
+                </div>
+                {/* Add video status indicator */}
+                <div className="absolute top-2 right-2 bg-green-600 px-2 py-1 rounded text-xs">
+                  🎥 Live
                 </div>
               </div>
             ))}
@@ -749,6 +853,8 @@ export default function LiveClass() {
               <div>Chat Messages: {chatMessages.length}</div>
               <div>Session Active: {sessionInfo?.isActive ? "✅ YES" : "❌ NO"}</div>
               <div>Joined: {joined ? "✅ YES" : "❌ NO"}</div>
+              <div>Remote Users: {remoteUsers.length}</div>
+              <div>Has Speaking Permission: {hasSpeakingPermission ? "✅ YES" : "❌ NO"}</div>
             </div>
           </div>
 
