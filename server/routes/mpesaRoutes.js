@@ -1,3 +1,4 @@
+// mpesaroutes.js
 import express from "express";
 import axios from "axios";
 import dotenv from "dotenv";
@@ -29,6 +30,7 @@ const generateToken = async () => {
 /* ===================================================
    💳 STK PUSH - WEEKLY SUBJECT FREQUENCY PAYMENT
 =================================================== */
+/*
 router.post("/stkpush", verifyToken, roleCheck(["student"]), async (req, res) => {
   try {
     const { phone, subjects } = req.body; // subjects now contains {subject, frequency}
@@ -155,10 +157,12 @@ router.post("/stkpush", verifyToken, roleCheck(["student"]), async (req, res) =>
     });
   }
 });
+*/
 
 /* ===================================================
    🔔 M-PESA CALLBACK — Finalize Subscription & Initialize Credits
 =================================================== */
+/*
 router.post("/callback", async (req, res) => {
   try {
     const body = req.body;
@@ -269,5 +273,6 @@ router.post("/callback", async (req, res) => {
     res.status(500).json({ message: "Callback processing error" });
   }
 });
+*/
 
 export default router;

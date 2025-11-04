@@ -137,8 +137,9 @@ router.get("/teacher-session/:classId", verifyToken, async (req, res) => {
   }
 });
 
-// 🔹 Join a live class (Student/Teacher) - WITH SUBSCRIPTION CHECK
-router.post("/join/:sessionId", verifyToken, checkSubscription, async (req, res) => {
+// 🔹 Join a live class (Student/Teacher) - WITHOUT SUBSCRIPTION CHECK
+router.post("/join/:sessionId", verifyToken, async (req, res) => {
+  // REMOVED: checkSubscription middleware to allow free access
   try {
     const { sessionId } = req.params;
     
@@ -214,11 +215,11 @@ router.post("/join/:sessionId", verifyToken, checkSubscription, async (req, res)
     // Generate Agora token
     const token = generateAgoraToken(liveSession.channelName, 0, role);
 
-    console.log("✅ User joined live class - Token generated:", token ? "YES" : "NO");
+    console.log("✅ User joined live class - FREE ACCESS - Token generated:", token ? "YES" : "NO");
 
     // Prepare response data
     const responseData = {
-      message: "Joined live class successfully",
+      message: "Joined live class successfully - FREE ACCESS",
       session: {
         id: liveSession._id,
         channelName: liveSession.channelName,
@@ -236,17 +237,11 @@ router.post("/join/:sessionId", verifyToken, checkSubscription, async (req, res)
         role: req.user.role === "teacher" ? "host" : "audience"
       },
       token,
-      appId: process.env.VITE_AGORA_APP_ID
+      appId: process.env.VITE_AGORA_APP_ID,
+      // Add free access notice
+      accessType: "free",
+      note: "Free access enabled - no subscription required"
     };
-
-    // Add subscription info to response for students
-    if (req.user.role === "student" && req.subscription) {
-      responseData.subscription = {
-        status: "active",
-        expiryDate: req.subscription.expiryDate,
-        subjects: req.subscription.subjects
-      };
-    }
 
     res.json(responseData);
 

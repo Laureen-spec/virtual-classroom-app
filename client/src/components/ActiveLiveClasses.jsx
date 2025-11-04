@@ -11,7 +11,8 @@ export default function ActiveLiveClasses() {
 
   useEffect(() => {
     fetchActiveSessions();
-    checkSubscriptionStatus();
+    // COMMENT OUT subscription check - students can join without subscription
+    // checkSubscriptionStatus();
     const interval = setInterval(fetchActiveSessions, 10000); // Poll every 10 seconds
     return () => clearInterval(interval);
   }, []);
@@ -27,6 +28,8 @@ export default function ActiveLiveClasses() {
     }
   };
 
+  // COMMENT OUT subscription check function
+  /*
   const checkSubscriptionStatus = async () => {
     try {
       setSubscriptionLoading(true);
@@ -44,9 +47,14 @@ export default function ActiveLiveClasses() {
       setSubscriptionLoading(false);
     }
   };
+  */
 
   const joinSession = async (sessionId) => {
     try {
+      // ✅ ALLOW ALL USERS TO JOIN WITHOUT SUBSCRIPTION CHECK
+      navigate(`/class/${sessionId}`);
+      
+      /* COMMENT OUT THE ORIGINAL SUBSCRIPTION CHECK:
       const userRole = localStorage.getItem("role");
       
       // Teachers and admins can join directly without subscription check
@@ -68,6 +76,7 @@ export default function ActiveLiveClasses() {
         // Student has active subscription, proceed to join
         navigate(`/class/${sessionId}`);
       }
+      */
     } catch (err) {
       console.error("Join session error:", err);
       alert("Failed to join session. Please try again.");
@@ -75,13 +84,22 @@ export default function ActiveLiveClasses() {
   };
 
   const getJoinButtonText = () => {
+    // ✅ ALL USERS CAN JOIN LIVE CLASSES
+    return "Join Live";
+    
+    /* COMMENT OUT ORIGINAL:
     const userRole = localStorage.getItem("role");
     if (userRole === "teacher" || userRole === "admin") return "Join Live";
     if (subscriptionStatus) return "Join Live";
     return "Subscribe to Join";
+    */
   };
 
   const getJoinButtonClass = () => {
+    // ✅ USE GREEN BUTTON FOR ALL USERS
+    return "bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition-all flex items-center";
+    
+    /* COMMENT OUT ORIGINAL:
     const userRole = localStorage.getItem("role");
     if (userRole === "teacher" || userRole === "admin") 
       return "bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition-all flex items-center";
@@ -90,8 +108,11 @@ export default function ActiveLiveClasses() {
       return "bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition-all flex items-center";
     
     return "bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-lg transition-all flex items-center";
+    */
   };
 
+  // COMMENT OUT subscription status display function
+  /*
   const getSubscriptionStatusDisplay = () => {
     const userRole = localStorage.getItem("role");
     
@@ -139,6 +160,7 @@ export default function ActiveLiveClasses() {
       );
     }
   };
+  */
 
   if (loading) {
     return (
@@ -158,11 +180,20 @@ export default function ActiveLiveClasses() {
     <div className="bg-white rounded-lg shadow p-6">
       <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center">
         <span className="text-red-500 mr-2">🔴</span>
-        Active Live Classes
+        Active Live Classes - FREE ACCESS
       </h2>
 
-      {/* Subscription Status Banner - Only for students */}
-      {localStorage.getItem("role") === "student" && getSubscriptionStatusDisplay()}
+      {/* ✅ REMOVE Subscription Status Banner - Students can join without subscription */}
+      {/* {localStorage.getItem("role") === "student" && getSubscriptionStatusDisplay()} */}
+
+      {/* ✅ ADD FREE ACCESS NOTICE */}
+      <div className="mb-4 p-3 rounded-lg bg-blue-100 border border-blue-300 text-blue-800">
+        <div className="flex justify-between items-center">
+          <span className="font-medium">
+            🎉 FREE ACCESS: All students can join live classes without subscription!
+          </span>
+        </div>
+      </div>
 
       {activeSessions.length === 0 ? (
         <p className="text-gray-500 text-center py-8">
@@ -191,19 +222,19 @@ export default function ActiveLiveClasses() {
                 <button
                   onClick={() => joinSession(session._id)}
                   className={getJoinButtonClass()}
-                  disabled={localStorage.getItem("role") === "student" && !subscriptionStatus && subscriptionLoading}
+                  // ✅ REMOVE subscription loading check
                 >
                   <span className="mr-2">🎥</span>
-                  {subscriptionLoading ? "Checking..." : getJoinButtonText()}
+                  {getJoinButtonText()}
                 </button>
               </div>
 
-              {/* Subscription warning for students without subscription */}
-              {localStorage.getItem("role") === "student" && !subscriptionStatus && !subscriptionLoading && (
+              {/* ✅ REMOVE Subscription warning for students */}
+              {/* {localStorage.getItem("role") === "student" && !subscriptionStatus && !subscriptionLoading && (
                 <div className="mt-2 p-2 bg-orange-50 border border-orange-200 rounded text-xs text-orange-700">
                   🔒 Subscription required to join this live class
                 </div>
-              )}
+              )} */}
             </div>
           ))}
         </div>

@@ -1,8 +1,12 @@
 import Subscription from "../models/Subscription.js";
 
-// 🔹 Check if user has active subscription
+// 🔹 Check if user has active subscription - COMMENTED OUT FOR FREE ACCESS
 export const checkSubscription = async (req, res, next) => {
   try {
+    // Skip subscription check for all users - ALLOW FREE ACCESS
+    return next(); // ✅ REMOVE SUBSCRIPTION CHECK TEMPORARILY
+    
+    /* COMMENT OUT THE ORIGINAL CODE:
     // Skip subscription check for teachers and admins
     if (req.user.role === "teacher" || req.user.role === "admin") {
       return next();
@@ -25,6 +29,7 @@ export const checkSubscription = async (req, res, next) => {
     // Attach subscription info to request for later use
     req.subscription = activeSubscription;
     next();
+    */
   } catch (error) {
     console.error("Subscription check error:", error);
     res.status(500).json({ message: "Error checking subscription status" });
@@ -34,6 +39,11 @@ export const checkSubscription = async (req, res, next) => {
 // 🔹 Optional: Check subscription but don't block (for info purposes)
 export const getSubscriptionInfo = async (req, res, next) => {
   try {
+    // Skip subscription check for free access
+    req.subscription = null;
+    next();
+    
+    /* COMMENT OUT ORIGINAL:
     if (req.user.role === "student") {
       const subscription = await Subscription.findOne({
         student: req.user.id,
@@ -44,6 +54,7 @@ export const getSubscriptionInfo = async (req, res, next) => {
       req.subscription = subscription;
     }
     next();
+    */
   } catch (error) {
     console.error("Subscription info error:", error);
     next(); // Continue even if subscription check fails

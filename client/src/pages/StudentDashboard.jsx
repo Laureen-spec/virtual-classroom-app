@@ -29,7 +29,8 @@ export default function StudentDashboard() {
   const goToNotifications = () => { navigate("/notifications"); setIsMobileMenuOpen(false); };
   const goToChangePassword = () => { navigate("/change-password"); setIsMobileMenuOpen(false); };
 
-  // Check subscription status function - UPDATED: Better error handling
+  // COMMENT OUT subscription check - not needed for free access
+  /*
   const checkSubscriptionStatus = async () => {
     try {
       const response = await API.get("/subscriptions/check");
@@ -40,6 +41,7 @@ export default function StudentDashboard() {
       setSubscriptionStatus(null);
     }
   };
+  */
 
   useEffect(() => {
     const fetchData = async () => {
@@ -53,8 +55,8 @@ export default function StudentDashboard() {
         const notifRes = await API.get("/notifications");
         setNotifications(notifRes.data);
 
-        // Check subscription status
-        await checkSubscriptionStatus();
+        // ✅ REMOVE subscription status check - free access enabled
+        // await checkSubscriptionStatus();
 
         setLoading(false);
       } catch (error) {
@@ -128,6 +130,7 @@ export default function StudentDashboard() {
             🧮 Marks
           </button>
 
+          {/* ✅ OPTIONAL: Keep subscribe button but make it optional */}
           <button
             onClick={goToSubscribe}
             className="bg-green-600 text-white px-3 py-2 rounded hover:bg-green-700 shadow-md text-sm lg:text-base"
@@ -193,6 +196,7 @@ export default function StudentDashboard() {
             >
               🧮 Marks
             </button>
+            {/* ✅ OPTIONAL: Keep subscribe button in mobile menu */}
             <button
               onClick={goToSubscribe}
               className="bg-green-600 text-white p-2 rounded hover:bg-green-700 shadow-md text-xs"
@@ -221,51 +225,42 @@ export default function StudentDashboard() {
         </div>
       )}
 
-      {/* SUBSCRIPTION STATUS BANNER - UPDATED: Mobile responsive */}
+      {/* ✅ REPLACE SUBSCRIPTION BANNER WITH FREE ACCESS NOTICE */}
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+          <div className="flex-1">
+            <h3 className="font-semibold text-blue-800 text-lg sm:text-base">🎉 FREE ACCESS ENABLED</h3>
+            <p className="text-blue-600 text-sm mt-1">
+              All students can now join live classes without subscription! Enjoy unlimited access to interactive learning.
+            </p>
+          </div>
+          <span className="bg-blue-600 text-white px-3 py-1 rounded-full text-sm mt-2 sm:mt-0 self-start sm:self-auto">
+            Free Access
+          </span>
+        </div>
+      </div>
+
+      {/* ✅ REMOVE original subscription status banners */}
+      {/*
       {!subscriptionStatus && (
         <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 mb-6">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-            <div className="flex-1">
-              <h3 className="font-semibold text-orange-800 text-lg sm:text-base">🎓 Unlock Live Classes</h3>
-              <p className="text-orange-600 text-sm mt-1">
-                Subscribe now to access live classes, interactive sessions, and real-time learning.
-              </p>
-            </div>
-            <button
-              onClick={() => navigate("/subscribe")}
-              className="bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-lg transition-all w-full sm:w-auto mt-2 sm:mt-0"
-            >
-              Subscribe Now
-            </button>
-          </div>
+          // ... original no subscription banner ...
         </div>
       )}
 
       {subscriptionStatus && (
         <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-6">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-            <div className="flex-1">
-              <h3 className="font-semibold text-green-800 text-lg sm:text-base">✅ Active Subscription</h3>
-              <p className="text-green-600 text-sm mt-1">
-                Expires on: {new Date(subscriptionStatus.expiryDate).toLocaleDateString()}
-              </p>
-              <p className="text-green-500 text-xs mt-1">
-                Subjects: {subscriptionStatus.subjects?.join(", ") || "All subjects"}
-              </p>
-            </div>
-            <span className="bg-green-600 text-white px-3 py-1 rounded-full text-sm mt-2 sm:mt-0 self-start sm:self-auto">
-              {subscriptionStatus.subjects?.length || 0} Subjects
-            </span>
-          </div>
+          // ... original active subscription banner ...
         </div>
       )}
+      */}
 
       {/* 🔴 ACTIVE LIVE CLASSES SECTION */}
       <div className="mb-6">
         <ActiveLiveClasses />
       </div>
 
-      {/* Subscriptions Section - UPDATED: Mobile responsive */}
+      {/* Rest of the component remains the same... */}
       <div className="bg-white rounded-2xl shadow p-4 mb-6">
         <h2 className="text-lg sm:text-xl font-semibold text-green-700 mb-3">
           📆 Your Subscriptions
