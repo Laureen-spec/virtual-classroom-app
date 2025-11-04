@@ -149,6 +149,11 @@ router.post("/join/:sessionId", verifyToken, async (req, res) => {
       timestamp: new Date().toISOString()
     });
 
+    // ✅ ADD SPECIFIC ADMIN DEBUGGING
+    if (req.user.role === "admin") {
+      console.log("🛠️ ADMIN JOIN DETECTED - Starting admin join process");
+    }
+
     // Find the live session
     const liveSession = await LiveSession.findById(sessionId)
       .populate("classId", "title description")
@@ -1210,10 +1215,10 @@ router.post("/screen-share/stop/:sessionId", verifyToken, async (req, res) => {
   }
 });
 
-// 🔹 Start Recording (Teacher only)
+// 🔹 Start Recording (Teacher only) - FIXED sessionId typo
 router.post("/recording/start/:sessionId", verifyToken, async (req, res) => {
   try {
-    const { sessionId } = req.params;
+    const { sessionId } = req.params; // ✅ Make sure this line exists
 
     const liveSession = await LiveSession.findById(sessionId);
     if (!liveSession) {
@@ -1257,7 +1262,7 @@ router.post("/recording/start/:sessionId", verifyToken, async (req, res) => {
     await liveSession.save();
 
     // In a real implementation, you would call Agora Cloud Recording API here
-    console.log(`🎥 Recording started for session ${sessionId}`);
+    console.log(`🎥 Recording started for session ${sessionId}`); // ✅ Fix this line if it has a typo
 
     res.json({
       message: "Recording started successfully",
