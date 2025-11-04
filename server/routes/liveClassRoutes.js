@@ -136,7 +136,7 @@ router.get("/teacher-session/:classId", verifyToken, async (req, res) => {
   }
 });
 
-// 🔹 Join a live class (Student/Teacher/Admin) - WITHOUT SUBSCRIPTION CHECK
+// 🔹 Join a live class (Student/Teacher/Admin) - FIXED ADMIN AUTH
 router.post("/join/:sessionId", verifyToken, async (req, res) => {
   try {
     const { sessionId } = req.params;
@@ -149,9 +149,21 @@ router.post("/join/:sessionId", verifyToken, async (req, res) => {
       timestamp: new Date().toISOString()
     });
 
-    // ✅ ADD SPECIFIC ADMIN DEBUGGING
+    // ✅ CRITICAL FIX: Handle admin with null userId in localStorage
     if (req.user.role === "admin") {
-      console.log("🛠️ ADMIN JOIN DETECTED - Starting admin join process");
+      console.log("🛠️ ADMIN JOIN DETECTED - User ID from token:", req.user.id);
+      
+      // Find admin user to get complete info
+      const adminUser = await User.findById(req.user.id);
+      if (!adminUser) {
+        return res.status(404).json({ message: "Admin user not found in database" });
+      }
+      
+      console.log("✅ Admin verified in database:", {
+        name: adminUser.name,
+        email: adminUser.email,
+        role: adminUser.role
+      });
     }
 
     // Find the live session
@@ -192,12 +204,12 @@ router.post("/join/:sessionId", verifyToken, async (req, res) => {
     let isMuted = liveSession.settings.autoMuteNewStudents;
     let hasSpeakingPermission = false;
 
-    // ✅ IMPROVED ADMIN ROLE HANDLING WITH DEBUGGING
+    // ✅ IMPROVED ADMIN ROLE HANDLING
     if (req.user.role === "admin") {
       role = RtcRole.PUBLISHER;
       isMuted = false;
       hasSpeakingPermission = true;
-      console.log("🔧 ADMIN joining with host privileges - Full publisher access");
+      console.log("🔧 ADMIN joining with FULL HOST privileges");
     }
     // Teacher joins as host
     else if (req.user.role === "teacher" && liveSession.teacherId._id.toString() === req.user.id) {
@@ -246,13 +258,13 @@ router.post("/join/:sessionId", verifyToken, async (req, res) => {
       });
     } else {
       existingParticipant.lastJoinTime = new Date();
-      // ✅ Update role for admin if they rejoined
+      // ✅ FORCE UPDATE ROLE FOR ADMIN (in case they rejoined)
       if (req.user.role === "admin") {
         existingParticipant.role = "host";
         existingParticipant.hasSpeakingPermission = true;
         existingParticipant.isMuted = false;
         existingParticipant.videoOn = true;
-        console.log("✅ Updated existing admin participant with host privileges");
+        console.log("✅ Updated existing admin participant with HOST privileges");
       }
       console.log("✅ Updated existing participant:", {
         userId: req.user.id,
@@ -306,8 +318,8 @@ router.post("/join/:sessionId", verifyToken, async (req, res) => {
     console.error("❌ Error joining live class:", {
       error: error.message,
       stack: error.stack,
-      userId: req.user.id,
-      userRole: req.user.role,
+      userId: req.user?.id,
+      userRole: req.user?.role,
       sessionId: sessionId,
       timestamp: new Date().toISOString()
     });
