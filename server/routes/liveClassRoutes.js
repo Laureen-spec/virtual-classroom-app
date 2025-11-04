@@ -141,17 +141,26 @@ router.post("/join/:sessionId", verifyToken, async (req, res) => {
   try {
     const { sessionId } = req.params;
     
+    console.log("🔹 JOIN ATTEMPT - User Info:", {
+      userId: req.user.id,
+      userRole: req.user.role,
+      userEmail: req.user.email,
+      sessionId: sessionId,
+      timestamp: new Date().toISOString()
+    });
+
     // Find the live session
     const liveSession = await LiveSession.findById(sessionId)
       .populate("classId", "title description")
       .populate("teacherId", "name");
 
     if (!liveSession) {
+      console.log("❌ Live session not found:", sessionId);
       return res.status(404).json({ message: "Live session not found" });
     }
 
     if (!liveSession.isActive) {
-      console.log(`Session ${sessionId} is not active. isActive: ${liveSession.isActive}`);
+      console.log(`❌ Session ${sessionId} is not active. isActive: ${liveSession.isActive}`);
       return res.status(400).json({ 
         message: "This live session has ended",
         details: {
@@ -162,6 +171,13 @@ router.post("/join/:sessionId", verifyToken, async (req, res) => {
       });
     }
 
+    console.log("✅ Session found and active:", {
+      sessionTitle: liveSession.sessionTitle,
+      teacherId: liveSession.teacherId._id.toString(),
+      teacherName: liveSession.teacherId.name,
+      channelName: liveSession.channelName
+    });
+
     // Check if user is already a participant
     const existingParticipant = liveSession.participants.find(
       p => p.studentId.toString() === req.user.id
@@ -171,19 +187,19 @@ router.post("/join/:sessionId", verifyToken, async (req, res) => {
     let isMuted = liveSession.settings.autoMuteNewStudents;
     let hasSpeakingPermission = false;
 
-    // ✅ FIX: Handle ADMIN role properly
-    // Admin joins as publisher (host privileges)
+    // ✅ IMPROVED ADMIN ROLE HANDLING WITH DEBUGGING
     if (req.user.role === "admin") {
       role = RtcRole.PUBLISHER;
       isMuted = false;
       hasSpeakingPermission = true;
-      console.log("🔧 ADMIN joining with host privileges");
+      console.log("🔧 ADMIN joining with host privileges - Full publisher access");
     }
     // Teacher joins as host
     else if (req.user.role === "teacher" && liveSession.teacherId._id.toString() === req.user.id) {
       role = RtcRole.PUBLISHER;
       isMuted = false;
       hasSpeakingPermission = true;
+      console.log("👨‍🏫 Teacher joining with host privileges");
       
       // Reset leftAt time when teacher rejoins
       if (existingParticipant && existingParticipant.leftAt) {
@@ -199,18 +215,29 @@ router.post("/join/:sessionId", verifyToken, async (req, res) => {
           messageType: "system"
         });
       }
+    } else {
+      console.log("🎓 Student joining with subscriber role");
     }
 
     // Add user to participants if not already added
     if (!existingParticipant) {
-      liveSession.participants.push({
+      const newParticipant = {
         studentId: req.user.id,
         role: req.user.role === "teacher" || req.user.role === "admin" ? "host" : "audience",
         isMuted,
         isHandRaised: false,
         hasSpeakingPermission,
         permissionRequested: false,
-        lastJoinTime: new Date()
+        lastJoinTime: new Date(),
+        videoOn: req.user.role === "admin" ? true : false // Default video on for admin
+      };
+      
+      liveSession.participants.push(newParticipant);
+      console.log("✅ Added new participant:", {
+        userId: req.user.id,
+        role: newParticipant.role,
+        isMuted: newParticipant.isMuted,
+        hasSpeakingPermission: newParticipant.hasSpeakingPermission
       });
     } else {
       existingParticipant.lastJoinTime = new Date();
@@ -219,7 +246,14 @@ router.post("/join/:sessionId", verifyToken, async (req, res) => {
         existingParticipant.role = "host";
         existingParticipant.hasSpeakingPermission = true;
         existingParticipant.isMuted = false;
+        existingParticipant.videoOn = true;
+        console.log("✅ Updated existing admin participant with host privileges");
       }
+      console.log("✅ Updated existing participant:", {
+        userId: req.user.id,
+        role: existingParticipant.role,
+        isMuted: existingParticipant.isMuted
+      });
     }
 
     await liveSession.save();
@@ -227,7 +261,7 @@ router.post("/join/:sessionId", verifyToken, async (req, res) => {
     // Generate Agora token
     const token = generateAgoraToken(liveSession.channelName, 0, role);
 
-    console.log(`✅ ${req.user.role.toUpperCase()} joined live class - Token generated:`, token ? "YES" : "NO");
+    console.log(`✅ ${req.user.role.toUpperCase()} joined live class successfully - Token generated:`, token ? "YES" : "NO");
 
     // Prepare response data
     const responseData = {
@@ -246,18 +280,37 @@ router.post("/join/:sessionId", verifyToken, async (req, res) => {
         isMuted,
         hasSpeakingPermission,
         canSelfUnmute: hasSpeakingPermission && !isMuted,
-        role: req.user.role === "teacher" || req.user.role === "admin" ? "host" : "audience"
+        role: req.user.role === "teacher" || req.user.role === "admin" ? "host" : "audience",
+        videoOn: req.user.role === "admin" ? true : false // Default video on for admin
       },
       token,
       appId: process.env.VITE_AGORA_APP_ID,
       accessType: "free"
     };
 
+    console.log("📤 Sending join response:", {
+      userId: req.user.id,
+      userRole: req.user.role,
+      isHost: responseData.session.isHost,
+      hasSpeakingPermission: responseData.participantInfo.hasSpeakingPermission
+    });
+
     res.json(responseData);
 
   } catch (error) {
-    console.error("Error joining live class:", error);
-    res.status(500).json({ message: "Failed to join live class", error: error.message });
+    console.error("❌ Error joining live class:", {
+      error: error.message,
+      stack: error.stack,
+      userId: req.user.id,
+      userRole: req.user.role,
+      sessionId: sessionId,
+      timestamp: new Date().toISOString()
+    });
+    res.status(500).json({ 
+      message: "Failed to join live class", 
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 });
 

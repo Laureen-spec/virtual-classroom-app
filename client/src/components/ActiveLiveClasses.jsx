@@ -51,7 +51,28 @@ export default function ActiveLiveClasses() {
 
   const joinSession = async (sessionId) => {
     try {
-      // ✅ ALLOW ALL USERS TO JOIN WITHOUT SUBSCRIPTION CHECK
+      // ✅ IMPROVED: Check if user is authenticated with debugging
+      const token = localStorage.getItem("token");
+      const userRole = localStorage.getItem("role");
+      const userId = localStorage.getItem("userId");
+      
+      console.log("🔄 Join session attempt:", {
+        sessionId,
+        userRole,
+        userId,
+        hasToken: !!token
+      });
+
+      if (!token || !userId) {
+        console.error("❌ Missing authentication data - redirecting to login");
+        alert("Please log in again to join the live class");
+        navigate("/register");
+        return;
+      }
+
+      console.log("✅ User authenticated, proceeding to join session");
+      
+      // ✅ ALLOW ALL AUTHENTICATED USERS TO JOIN WITHOUT SUBSCRIPTION CHECK
       navigate(`/class/${sessionId}`);
       
       /* COMMENT OUT THE ORIGINAL SUBSCRIPTION CHECK:

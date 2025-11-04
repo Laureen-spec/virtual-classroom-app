@@ -214,7 +214,7 @@ export default function LiveClass() {
     }
   };
 
-  // UPDATED: Fetch session info and join class with better error handling and admin support
+  // IMPROVED: Fetch session info and join class with better error handling and admin support
   const joinClass = async () => {
     try {
       console.log("🔄 Attempting to join class...");
@@ -222,14 +222,19 @@ export default function LiveClass() {
       console.log("👤 User Role:", localStorage.getItem("role"));
       console.log("🔑 User ID:", localStorage.getItem("userId"));
       
-      // Check if token exists
+      // ✅ IMPROVED AUTHENTICATION CHECK
       const token = localStorage.getItem("token");
-      if (!token) {
-        console.error("❌ No authentication token found");
+      const userRole = localStorage.getItem("role");
+      const userId = localStorage.getItem("userId");
+      
+      if (!token || !userId) {
+        console.error("❌ Missing authentication data");
         alert("Please log in again");
         navigate("/register");
         return;
       }
+
+      console.log("✅ Authentication data present");
 
       // Join the live session via backend
       const joinResponse = await API.post(`/live/join/${sessionId}`);
@@ -242,19 +247,17 @@ export default function LiveClass() {
       setIsMuted(participantInfo.isMuted);
       setHasSpeakingPermission(participantInfo.hasSpeakingPermission);
       
-      // ✅ FIX: Handle admin role detection properly
-      const userRole = localStorage.getItem("role");
-      setIsTeacher(participantInfo.role === "host" || userRole === "admin");
+      // ✅ IMPROVED ROLE DETECTION
+      const isUserTeacher = participantInfo.role === "host" || userRole === "teacher" || userRole === "admin";
+      setIsTeacher(isUserTeacher);
       
-      setIsVideoOn(participantInfo.videoOn || true);
-      setIsScreenSharing(participantInfo.isScreenSharing || false);
-
-      console.log("🎯 User is teacher:", participantInfo.role === "host" || userRole === "admin");
+      console.log("🎯 User is teacher/host:", isUserTeacher);
       console.log("🎯 Participant role:", participantInfo.role);
+      console.log("🎯 User role from localStorage:", userRole);
 
       // Check if teacher is rejoining
-      if (isTeacher && participantInfo.role === "host") {
-        console.log("Teacher rejoining live session");
+      if (isUserTeacher && participantInfo.role === "host") {
+        console.log("Teacher/Admin rejoining live session");
       }
 
       // Join Agora channel
@@ -297,10 +300,13 @@ export default function LiveClass() {
     } catch (err) {
       console.error("❌ Join failed:", err);
       console.error("❌ Error response:", err.response?.data);
+      console.error("❌ Error status:", err.response?.status);
       
       if (err.response?.status === 401) {
         alert("Authentication failed. Please log in again.");
         navigate("/register");
+      } else if (err.response?.status === 404) {
+        alert("Live session not found or has ended.");
       } else {
         alert("Failed to join class: " + (err.response?.data?.message || err.message));
       }
