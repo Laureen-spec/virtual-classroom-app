@@ -38,6 +38,11 @@ export default function LiveClass() {
   const [lastActivity, setLastActivity] = useState(Date.now());
   const [showTimeoutWarning, setShowTimeoutWarning] = useState(false);
 
+  // Mobile responsive state
+  const [isMobile, setIsMobile] = useState(false);
+  const [showChat, setShowChat] = useState(false);
+  const [showControls, setShowControls] = useState(false);
+
   // Loading states
   const [isMuteLoading, setIsMuteLoading] = useState(false);
   const [isVideoLoading, setIsVideoLoading] = useState(false);
@@ -90,6 +95,18 @@ export default function LiveClass() {
       console.log(...args);
     }
   };
+
+  // Check mobile device
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   // Input sanitization function
   const sanitizeMessage = (text) => {
@@ -1103,7 +1120,7 @@ export default function LiveClass() {
       {/* Timeout Warning Modal */}
       {showTimeoutWarning && (
         <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
-          <div className="bg-gray-800 p-6 rounded-lg max-w-md">
+          <div className="bg-gray-800 p-6 rounded-lg max-w-md mx-4">
             <h3 className="text-lg font-semibold mb-4">Session Timeout Warning</h3>
             <p className="mb-4">Your session will end in 10 minutes due to inactivity.</p>
             <button
@@ -1120,24 +1137,34 @@ export default function LiveClass() {
         </div>
       )}
 
-      {/* Header */}
-      <div className="bg-gray-800 p-4 flex justify-between items-center">
-        <div>
-          <h1 className="text-2xl font-bold">
+      {/* Header - Mobile Responsive */}
+      <div className="bg-gray-800 p-4 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
+        <div className="flex-1 min-w-0">
+          <h1 className="text-xl sm:text-2xl font-bold truncate">
             🎥 {sessionInfo?.title || "Live Class"}
           </h1>
-          <p className="text-gray-400">
+          <p className="text-gray-400 text-sm sm:text-base truncate">
             Teacher: {sessionInfo?.teacherName} | 
             Class: {sessionInfo?.className}
           </p>
         </div>
         
-        <div className="flex items-center space-x-4">
+        {/* Mobile Controls Toggle */}
+        {isMobile && (
+          <button
+            onClick={() => setShowControls(!showControls)}
+            className="bg-gray-700 hover:bg-gray-600 px-3 py-2 rounded text-sm"
+          >
+            {showControls ? "Hide Controls" : "Show Controls"}
+          </button>
+        )}
+        
+        <div className={`flex items-center space-x-2 sm:space-x-4 ${isMobile && !showControls ? 'hidden' : 'flex'}`}>
           {/* Recording Indicator for all participants */}
           {isRecording && (
-            <div className="bg-red-600 text-white px-3 py-1 rounded-full text-sm flex items-center">
-              <span className="animate-pulse mr-2">🔴</span>
-              RECORDING
+            <div className="bg-red-600 text-white px-2 py-1 rounded-full text-xs sm:text-sm flex items-center">
+              <span className="animate-pulse mr-1">🔴</span>
+              <span className="hidden sm:inline">RECORDING</span>
             </div>
           )}
 
@@ -1146,7 +1173,7 @@ export default function LiveClass() {
             <button
               onClick={toggleScreenShare}
               disabled={isScreenShareLoading}
-              className={`p-3 rounded-full ${
+              className={`p-2 sm:p-3 rounded-full ${
                 isScreenSharing 
                   ? "bg-purple-600 hover:bg-purple-700" 
                   : "bg-gray-600 hover:bg-gray-700"
@@ -1163,7 +1190,7 @@ export default function LiveClass() {
           <button
             onClick={toggleVideo}
             disabled={isVideoLoading}
-            className={`p-3 rounded-full ${
+            className={`p-2 sm:p-3 rounded-full ${
               isVideoOn 
                 ? "bg-green-600 hover:bg-green-700" 
                 : "bg-red-600 hover:bg-red-700"
@@ -1179,7 +1206,7 @@ export default function LiveClass() {
           <button
             onClick={toggleMute}
             disabled={isMuteLoading}
-            className={`p-3 rounded-full ${
+            className={`p-2 sm:p-3 rounded-full ${
               isMuted 
                 ? "bg-red-600 hover:bg-red-700" 
                 : "bg-green-600 hover:bg-green-700"
@@ -1195,7 +1222,7 @@ export default function LiveClass() {
           <button
             onClick={toggleHandRaise}
             disabled={isHandRaiseLoading}
-            className={`p-3 rounded-full ${
+            className={`p-2 sm:p-3 rounded-full ${
               isHandRaised 
                 ? "bg-yellow-600 hover:bg-yellow-700" 
                 : "bg-gray-600 hover:bg-gray-700"
@@ -1209,33 +1236,51 @@ export default function LiveClass() {
 
           {/* Permission Status */}
           {!isTeacher && (
-            <div className={`px-3 py-1 rounded-full text-sm ${
+            <div className={`px-2 py-1 rounded-full text-xs sm:text-sm ${
               hasSpeakingPermission 
                 ? "bg-green-600" 
                 : "bg-yellow-600"
             }`}>
-              {hasSpeakingPermission ? "🎤 Can Speak" : "⏳ Request Permission"}
+              <span className="hidden sm:inline">
+                {hasSpeakingPermission ? "🎤 Can Speak" : "⏳ Request Permission"}
+              </span>
+              <span className="sm:hidden">
+                {hasSpeakingPermission ? "🎤" : "⏳"}
+              </span>
             </div>
           )}
 
           <button
             onClick={leaveClass}
-            className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded transition-all"
+            className="bg-red-600 hover:bg-red-700 px-3 py-2 rounded text-sm transition-all"
             aria-label="Leave live class session"
           >
-            Leave Class
+            <span className="hidden sm:inline">Leave Class</span>
+            <span className="sm:hidden">Leave</span>
           </button>
         </div>
       </div>
 
-      <div className="flex h-[calc(100vh-80px)]">
-        {/* Video Grid - Left Side */}
-        <div className="flex-1 p-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      {/* Mobile Chat Toggle */}
+      {isMobile && (
+        <div className="bg-gray-700 p-2 flex justify-center border-b border-gray-600">
+          <button
+            onClick={() => setShowChat(!showChat)}
+            className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm"
+          >
+            {showChat ? "Hide Chat" : "Show Chat"}
+          </button>
+        </div>
+      )}
+
+      <div className={`h-[calc(100vh-80px)] ${isMobile ? 'flex flex-col' : 'flex'}`}>
+        {/* Video Grid - Main Content */}
+        <div className={`${isMobile ? (showChat ? 'hidden' : 'flex-1') : 'flex-1'} p-2 sm:p-4`}>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-4">
             {/* Local Video with Screen Sharing Indicator */}
-            <div className="bg-black rounded-lg overflow-hidden relative">
-              <div id="local-player" className="w-full h-48"></div>
-              <div className="absolute bottom-2 left-2 bg-black bg-opacity-50 px-2 py-1 rounded text-sm">
+            <div className="bg-black rounded-lg overflow-hidden relative aspect-video">
+              <div id="local-player" className="w-full h-full"></div>
+              <div className="absolute bottom-2 left-2 bg-black bg-opacity-50 px-2 py-1 rounded text-xs sm:text-sm">
                 You {isMuted && "🔇"} {!isVideoOn && "📷"} {isScreenSharing && "🖥️"}
               </div>
               {isScreenSharing && (
@@ -1247,24 +1292,23 @@ export default function LiveClass() {
 
             {/* ENHANCED: Remote Videos with better loading states */}
             {remoteUsers.map((user) => (
-              <div key={user.uid} className="bg-black rounded-lg overflow-hidden relative">
+              <div key={user.uid} className="bg-black rounded-lg overflow-hidden relative aspect-video">
                 <div 
                   id={`remote-${user.uid}`} 
-                  className="w-full h-48 remote-video-container"
+                  className="w-full h-full remote-video-container"
                   style={{ 
                     background: '#000',
-                    minHeight: '192px'
                   }}
                 >
                   {/* Add a loading indicator */}
                   <div className="absolute inset-0 flex items-center justify-center text-white">
                     <div className="text-center">
-                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white mx-auto mb-2"></div>
-                      <span className="text-sm">Loading video...</span>
+                      <div className="animate-spin rounded-full h-6 w-6 sm:h-8 sm:w-8 border-b-2 border-white mx-auto mb-1 sm:mb-2"></div>
+                      <span className="text-xs sm:text-sm">Loading video...</span>
                     </div>
                   </div>
                 </div>
-                <div className="absolute bottom-2 left-2 bg-black bg-opacity-50 px-2 py-1 rounded text-sm">
+                <div className="absolute bottom-2 left-2 bg-black bg-opacity-50 px-2 py-1 rounded text-xs sm:text-sm">
                   User {user.uid}
                 </div>
                 {/* Add video status indicator */}
@@ -1295,14 +1339,14 @@ export default function LiveClass() {
 
           {/* Teacher Controls */}
           {isTeacher && (
-            <div className="mt-6 bg-gray-800 p-4 rounded-lg">
+            <div className="mt-4 sm:mt-6 bg-gray-800 p-3 sm:p-4 rounded-lg">
               <h3 className="text-lg font-semibold mb-3">Teacher Controls</h3>
               
               {/* Recording Controls */}
               <div className="mb-4 p-3 bg-red-600 bg-opacity-20 rounded">
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                   <div>
-                    <span className="font-semibold">Recording: {isRecording ? "🔴 RECORDING" : "⏸️ NOT RECORDING"}</span>
+                    <span className="font-semibold text-sm sm:text-base">Recording: {isRecording ? "🔴 RECORDING" : "⏸️ NOT RECORDING"}</span>
                     {isRecording && recordingStatus?.startTime && (
                       <div className="text-xs text-gray-300">
                         Started: {new Date(recordingStatus.startTime).toLocaleTimeString()}
@@ -1319,15 +1363,15 @@ export default function LiveClass() {
                     } disabled:opacity-50`}
                     aria-label={isRecording ? "Stop recording" : "Start recording"}
                   >
-                    {isRecordingLoading ? "⏳" : (isRecording ? "⏹️ Stop Recording" : "🔴 Start Recording")}
+                    {isRecordingLoading ? "⏳" : (isRecording ? "⏹️ Stop" : "🔴 Start")}
                   </button>
                 </div>
               </div>
               
               {/* Screen Sharing Status */}
               <div className="mb-4 p-3 bg-purple-600 bg-opacity-20 rounded">
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold">Screen Sharing: {isScreenSharing ? "ACTIVE" : "INACTIVE"}</span>
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                  <span className="font-semibold text-sm sm:text-base">Screen Sharing: {isScreenSharing ? "ACTIVE" : "INACTIVE"}</span>
                   <button
                     onClick={toggleScreenShare}
                     disabled={isScreenShareLoading}
@@ -1338,23 +1382,23 @@ export default function LiveClass() {
                     } disabled:opacity-50`}
                     aria-label={isScreenSharing ? "Stop screen sharing" : "Start screen sharing"}
                   >
-                    {isScreenShareLoading ? "⏳" : (isScreenSharing ? "Stop Sharing" : "Start Sharing")}
+                    {isScreenShareLoading ? "⏳" : (isScreenSharing ? "Stop" : "Start")}
                   </button>
                 </div>
               </div>
 
               {/* Quick Actions */}
-              <div className="flex space-x-2 mb-4">
+              <div className="flex flex-wrap gap-2 mb-4">
                 <button
                   onClick={muteAllStudents}
-                  className="bg-red-600 hover:bg-red-700 px-3 py-2 rounded text-sm"
+                  className="bg-red-600 hover:bg-red-700 px-3 py-2 rounded text-sm flex-1 min-w-[120px]"
                   aria-label="Mute all students"
                 >
                   Mute All
                 </button>
                 <button
                   onClick={unmuteAllStudents}
-                  className="bg-green-600 hover:bg-green-700 px-3 py-2 rounded text-sm"
+                  className="bg-green-600 hover:bg-green-700 px-3 py-2 rounded text-sm flex-1 min-w-[120px]"
                   aria-label="Unmute all students"
                 >
                   Unmute All
@@ -1362,10 +1406,10 @@ export default function LiveClass() {
                 {/* End Live Class */}
                 <button
                   onClick={endLiveClass}
-                  className="bg-orange-600 hover:bg-orange-700 px-3 py-2 rounded text-sm"
+                  className="bg-orange-600 hover:bg-orange-700 px-3 py-2 rounded text-sm flex-1 min-w-[120px]"
                   aria-label="End live class for all participants"
                 >
-                  🛑 End Live Class
+                  🛑 End Class
                 </button>
               </div>
 
@@ -1373,27 +1417,29 @@ export default function LiveClass() {
               {pendingRequests.length > 0 && (
                 <div className="mb-4">
                   <h4 className="font-semibold mb-2">Pending Permission Requests</h4>
-                  {pendingRequests.map((request) => (
-                    <div key={request.requestId} className="flex items-center justify-between bg-yellow-600 bg-opacity-20 p-2 rounded mb-2">
-                      <span>{request.studentName}</span>
-                      <div className="flex space-x-2">
-                        <button
-                          onClick={() => grantSpeakingPermission(request.studentId)}
-                          className="bg-green-600 hover:bg-green-700 px-2 py-1 rounded text-xs"
-                          aria-label={`Grant speaking permission to ${request.studentName}`}
-                        >
-                          Approve
-                        </button>
-                        <button
-                          onClick={() => revokeSpeakingPermission(request.studentId)}
-                          className="bg-red-600 hover:bg-red-700 px-2 py-1 rounded text-xs"
-                          aria-label={`Deny speaking permission to ${request.studentName}`}
-                        >
-                          Deny
-                        </button>
+                  <div className="space-y-2 max-h-32 overflow-y-auto">
+                    {pendingRequests.map((request) => (
+                      <div key={request.requestId} className="flex items-center justify-between bg-yellow-600 bg-opacity-20 p-2 rounded">
+                        <span className="text-sm truncate flex-1 mr-2">{request.studentName}</span>
+                        <div className="flex space-x-1">
+                          <button
+                            onClick={() => grantSpeakingPermission(request.studentId)}
+                            className="bg-green-600 hover:bg-green-700 px-2 py-1 rounded text-xs"
+                            aria-label={`Grant speaking permission to ${request.studentName}`}
+                          >
+                            Approve
+                          </button>
+                          <button
+                            onClick={() => revokeSpeakingPermission(request.studentId)}
+                            className="bg-red-600 hover:bg-red-700 px-2 py-1 rounded text-xs"
+                            aria-label={`Deny speaking permission to ${request.studentName}`}
+                          >
+                            Deny
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
               )}
 
@@ -1403,18 +1449,18 @@ export default function LiveClass() {
                 <div className="space-y-2 max-h-40 overflow-y-auto">
                   {participants.map((participant) => (
                     <div key={participant.studentId} className="flex items-center justify-between bg-gray-700 p-2 rounded">
-                      <div className="flex items-center space-x-2">
-                        <span>{participant.name}</span>
-                        {participant.isHandRaised && <span className="text-yellow-400 animate-pulse">✋</span>}
-                        {participant.isMuted && <span className="text-red-400">🔇</span>}
+                      <div className="flex items-center space-x-2 flex-1 min-w-0">
+                        <span className="truncate text-sm">{participant.name}</span>
+                        {participant.isHandRaised && <span className="text-yellow-400 animate-pulse flex-shrink-0">✋</span>}
+                        {participant.isMuted && <span className="text-red-400 flex-shrink-0">🔇</span>}
                         {participant.hasSpeakingPermission && (
-                          <span className="text-green-400" title="Can speak">🎤</span>
+                          <span className="text-green-400 flex-shrink-0" title="Can speak">🎤</span>
                         )}
                         {!participant.hasSpeakingPermission && participant.permissionRequested && (
-                          <span className="text-orange-400 animate-pulse" title="Permission requested">⏳</span>
+                          <span className="text-orange-400 animate-pulse flex-shrink-0" title="Permission requested">⏳</span>
                         )}
                       </div>
-                      <div className="flex space-x-1">
+                      <div className="flex space-x-1 flex-shrink-0">
                         <button
                           onClick={() => muteStudent(participant.studentId)}
                           className="bg-red-600 hover:bg-red-700 px-2 py-1 rounded text-xs"
@@ -1437,7 +1483,7 @@ export default function LiveClass() {
                             className="bg-blue-600 hover:bg-blue-700 px-2 py-1 rounded text-xs"
                             aria-label={`Grant microphone permission to ${participant.name}`}
                           >
-                            Grant Mic
+                            Mic
                           </button>
                         )}
                       </div>
@@ -1450,9 +1496,19 @@ export default function LiveClass() {
         </div>
 
         {/* Chat Panel - Right Side */}
-        <div className="w-80 bg-gray-800 flex flex-col">
+        <div className={`${isMobile ? (showChat ? 'flex-1 flex flex-col' : 'hidden') : 'w-80'} bg-gray-800 flex flex-col`}>
           <div className="p-4 border-b border-gray-700">
-            <h3 className="font-semibold">Chat</h3>
+            <div className="flex justify-between items-center">
+              <h3 className="font-semibold">Chat</h3>
+              {isMobile && (
+                <button
+                  onClick={() => setShowChat(false)}
+                  className="bg-gray-600 hover:bg-gray-700 px-2 py-1 rounded text-sm"
+                >
+                  Close
+                </button>
+              )}
+            </div>
             <div className="text-xs text-gray-400 mt-1">
               {chatMessages.length} messages
             </div>
@@ -1500,7 +1556,7 @@ export default function LiveClass() {
                       {new Date(message.timestamp).toLocaleTimeString()}
                     </span>
                   </div>
-                  <p className="text-sm mt-1">{message.message}</p>
+                  <p className="text-sm mt-1 break-words">{message.message}</p>
                 </div>
               ))
             )}
@@ -1533,15 +1589,15 @@ export default function LiveClass() {
       {/* Join Button for non-joined state */}
       {!joined && (
         <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center">
-          <div className="bg-gray-800 p-8 rounded-lg text-center">
-            <h2 className="text-2xl font-bold mb-4">Join Live Class</h2>
+          <div className="bg-gray-800 p-6 sm:p-8 rounded-lg text-center mx-4 max-w-md w-full">
+            <h2 className="text-xl sm:text-2xl font-bold mb-4">Join Live Class</h2>
             <p className="text-gray-400 mb-6">
               {sessionInfo?.title || "Loading session..."}
             </p>
             <button
               onClick={joinClass}
               disabled={isJoinLoading}
-              className="bg-green-600 hover:bg-green-700 px-6 py-3 rounded-lg text-lg font-semibold transition-all disabled:opacity-50"
+              className="bg-green-600 hover:bg-green-700 px-6 py-3 rounded-lg text-lg font-semibold transition-all disabled:opacity-50 w-full"
               aria-label="Join live class session"
             >
               {isJoinLoading ? "Joining..." : "Join Class Now"}
