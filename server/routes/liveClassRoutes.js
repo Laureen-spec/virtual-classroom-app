@@ -900,7 +900,7 @@ router.get("/session/:sessionId", verifyToken, async (req, res) => {
     console.log("🔍 DEBUG: User is teacher:", isUserTeacher);
     console.log("🔍 DEBUG: User is admin:", isUserAdmin);
 
-    // Prepare response with enhanced participant info
+    // ✅ FIXED: Ensure isActive is properly set in response
     const responseData = {
       session: {
         _id: liveSession._id,
@@ -908,7 +908,7 @@ router.get("/session/:sessionId", verifyToken, async (req, res) => {
         teacherId: liveSession.teacherId,
         channelName: liveSession.channelName,
         sessionTitle: liveSession.sessionTitle,
-        isActive: liveSession.isActive,
+        isActive: liveSession.isActive !== undefined ? liveSession.isActive : true, // ✅ FIX
         startTime: liveSession.startTime,
         endTime: liveSession.endTime,
         settings: liveSession.settings,
@@ -955,6 +955,7 @@ router.get("/session/:sessionId", verifyToken, async (req, res) => {
 
     console.log("🔍 DEBUG: Sending response with", responseData.chatMessages.length, "chat messages");
     console.log("🔍 DEBUG: First chat message:", responseData.chatMessages[0]);
+    console.log("🔍 DEBUG: Session isActive in response:", responseData.session.isActive);
 
     res.json(responseData);
 

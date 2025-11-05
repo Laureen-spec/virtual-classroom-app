@@ -33,6 +33,25 @@ export default function LiveClass() {
   const client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
   const chatContainerRef = useRef(null);
 
+  // Monitor network stability
+  useEffect(() => {
+    const handleOnline = () => {
+      console.log("🌐 Network back online");
+    };
+    
+    const handleOffline = () => {
+      console.log("🌐 Network offline - audio/video may be affected");
+    };
+    
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
   // Debug useEffect to monitor chat state
   useEffect(() => {
     console.log("💬 Chat messages updated:", chatMessages);
@@ -313,6 +332,47 @@ export default function LiveClass() {
     }
   };
 
+  // ✅ IMPROVED: User published event handler with better stability
+  const handleUserPublished = async (user, mediaType) => {
+    console.log("🔍 User published:", user.uid, "Media type:", mediaType);
+    
+    try {
+      await client.subscribe(user, mediaType);
+      console.log("✅ Subscribed to user:", user.uid, "for", mediaType);
+      
+      // Add small delay for DOM stability
+      setTimeout(() => {
+        if (mediaType === "video" && user.videoTrack) {
+          const playerElement = document.getElementById(`remote-${user.uid}`);
+          if (playerElement) {
+            user.videoTrack.play(`remote-${user.uid}`);
+            console.log("🎥 Playing video for user:", user.uid);
+          }
+        }
+        
+        if (mediaType === "audio" && user.audioTrack) {
+          user.audioTrack.play();
+          console.log("🔊 Playing audio for user:", user.uid);
+        }
+      }, 200);
+      
+      // Update remote users state more carefully
+      setRemoteUsers((prev) => {
+        const existingUser = prev.find(u => u.uid === user.uid);
+        if (existingUser) {
+          // Update existing user
+          return prev.map(u => u.uid === user.uid ? { ...u, ...user } : u);
+        } else {
+          // Add new user
+          return [...prev, user];
+        }
+      });
+      
+    } catch (error) {
+      console.error("❌ Error subscribing to user:", error);
+    }
+  };
+
   // UPDATED: Fetch session info and join class with proper microphone permission
   const joinClass = async () => {
     try {
@@ -410,44 +470,8 @@ export default function LiveClass() {
       setLocalTracks({ audio: audioTrack, video: videoTrack });
       videoTrack.play("local-player");
 
-      // Setup remote user handling
-      client.on("user-published", async (user, mediaType) => {
-        console.log("🔍 User published:", user.uid, "Media type:", mediaType);
-        
-        try {
-          await client.subscribe(user, mediaType);
-          console.log("✅ Subscribed to user:", user.uid, "for", mediaType);
-          
-          if (mediaType === "video") {
-            setTimeout(() => {
-              const playerElement = document.getElementById(`remote-${user.uid}`);
-              if (playerElement && user.videoTrack) {
-                console.log("🎥 Playing video for user:", user.uid);
-                user.videoTrack.play(`remote-${user.uid}`);
-              }
-            }, 100);
-          }
-          
-          if (mediaType === "audio") {
-            if (user.audioTrack) {
-              user.audioTrack.play();
-              console.log("🔊 Playing audio for user:", user.uid);
-            }
-          }
-          
-          setRemoteUsers((prev) => {
-            const existingUser = prev.find(u => u.uid === user.uid);
-            if (existingUser) {
-              return prev.map(u => u.uid === user.uid ? user : u);
-            } else {
-              return [...prev, user];
-            }
-          });
-          
-        } catch (error) {
-          console.error("❌ Error subscribing to user:", error);
-        }
-      });
+      // Setup remote user handling with improved stability
+      client.on("user-published", handleUserPublished);
 
       client.on("user-unpublished", (user, mediaType) => {
         console.log("🔍 User unpublished:", user.uid, "Media type:", mediaType);
@@ -499,15 +523,18 @@ export default function LiveClass() {
     }
   };
 
-  // ✅ FIXED: Poll for session updates with proper error handling
+  // ✅ IMPROVED: Poll for session updates with better stability
   const startSessionPolling = () => {
-    console.log("🔄 Starting enhanced session polling...");
+    console.log("🔄 Starting STABLE session polling...");
+    
+    let isPolling = false; // Prevent overlapping requests
     
     const interval = setInterval(async () => {
-      if (!sessionId) {
-        console.log("❌ No sessionId available for polling");
-        return;
+      if (!sessionId || isPolling) {
+        return; // Skip if already polling or no session
       }
+      
+      isPolling = true;
       
       try {
         console.log("📡 Polling session data for:", sessionId);
@@ -515,6 +542,7 @@ export default function LiveClass() {
         
         if (!response.data) {
           console.log("❌ No data in polling response");
+          isPolling = false;
           return;
         }
 
@@ -526,21 +554,12 @@ export default function LiveClass() {
           userPermissions 
         } = response.data;
 
-        console.log("🔍 POLLING DEBUG:");
-        console.log("- Session isActive:", isActive);
-        console.log("- Chat messages received:", chatMessages?.length || 0);
-        console.log("- User permissions:", userPermissions);
-        
-        // CRITICAL FIX: Update teacher status from backend
-        if (userPermissions) {
-          console.log("🎯 Updating teacher status from backend:", userPermissions.isTeacher);
-          setIsTeacher(userPermissions.isTeacher);
-        }
-
-        // Only stop if session is truly ended
+        // Only update if session is active
         if (isActive === false) {
           console.log("⏹️ Session has ended - stopping updates");
-          // Don't return here, we still want to update UI with final state
+          clearInterval(interval);
+          isPolling = false;
+          return;
         }
         
         // Update participants
@@ -548,102 +567,57 @@ export default function LiveClass() {
           setParticipants(participants);
         }
         
-        // CRITICAL FIX: Update chat messages with proper validation
+        // Update chat messages only if changed
         if (chatMessages && Array.isArray(chatMessages)) {
-          console.log("💬 Setting chat messages:", chatMessages.length);
-          setChatMessages(chatMessages);
-          
-          // Debug first message
-          if (chatMessages.length > 0) {
-            console.log("💬 First message sample:", {
-              userName: chatMessages[0].userName,
-              message: chatMessages[0].message,
-              type: chatMessages[0].messageType
-            });
-          }
-        } else {
-          console.log("⚠️ No valid chat messages in response");
-          setChatMessages([]);
+          setChatMessages(prev => {
+            if (prev.length !== chatMessages.length) {
+              console.log("💬 Chat messages updated:", chatMessages.length);
+              return chatMessages;
+            }
+            return prev;
+          });
         }
         
         // Update pending requests for teachers
         if (userPermissions?.isTeacher && permissionRequests) {
           const pending = permissionRequests.filter(req => req.status === "pending");
           setPendingRequests(pending);
-          console.log("📋 Pending requests:", pending.length);
         }
 
-        // FIXED: Enhanced permission handling in polling
+        // FIXED: More stable participant state updates
         const currentUserId = localStorage.getItem("userId");
         if (participants && currentUserId) {
           const currentParticipant = participants.find(p => p.studentId === currentUserId);
           if (currentParticipant) {
-            console.log("👤 Updating participant state:", {
-              isMuted: currentParticipant.isMuted,
-              hasPermission: currentParticipant.hasSpeakingPermission,
-              handRaised: currentParticipant.isHandRaised
-            });
-            
-            // Update mute state
+            // Update mute state only if changed
             if (currentParticipant.isMuted !== isMuted) {
               setIsMuted(currentParticipant.isMuted);
               if (localTracks.audio) {
                 localTracks.audio.setEnabled(!currentParticipant.isMuted);
-                console.log(`🔊 Audio track ${currentParticipant.isMuted ? 'muted' : 'unmuted'}`);
               }
             }
             
-            // FIXED: Enhanced permission handling with immediate audio updates
+            // Update permission state only if changed
             if (currentParticipant.hasSpeakingPermission !== hasSpeakingPermission) {
-              const oldPermission = hasSpeakingPermission;
               setHasSpeakingPermission(currentParticipant.hasSpeakingPermission);
-              console.log(`🎤 Speaking permission ${currentParticipant.hasSpeakingPermission ? 'granted' : 'revoked'}`);
               
-              // CRITICAL: When permission is granted, ensure audio is properly enabled
+              // Only update audio if permission actually changed
               if (currentParticipant.hasSpeakingPermission && localTracks.audio) {
-                console.log("🎯 Permission granted - enabling audio track immediately");
-                
-                // Force enable the audio track
                 localTracks.audio.setEnabled(true);
-                
-                // CRITICAL: Republish audio track to ensure it's active for all users
-                try {
-                  await client.unpublish(localTracks.audio);
-                  await client.publish(localTracks.audio);
-                  console.log("✅ Audio track republished after permission grant");
-                  
-                  // Also update mute state if needed
-                  if (isMuted) {
-                    setIsMuted(false);
-                  }
-                } catch (error) {
-                  console.error("❌ Error republishing audio:", error);
-                }
-              }
-              
-              // If permission was revoked, mute the audio
-              if (!currentParticipant.hasSpeakingPermission && localTracks.audio && oldPermission) {
-                console.log("🔇 Permission revoked - muting audio");
-                localTracks.audio.setEnabled(false);
-                setIsMuted(true);
               }
             }
             
-            setIsHandRaised(currentParticipant.isHandRaised);
-            
-            // Update screen sharing state for teacher
-            if (userPermissions?.isTeacher) {
-              setIsScreenSharing(currentParticipant.isScreenSharing || false);
+            // Update hand raise state
+            if (currentParticipant.isHandRaised !== isHandRaised) {
+              setIsHandRaised(currentParticipant.isHandRaised);
             }
           }
         }
 
-        // Update recording status
-        await updateRecordingStatus();
-
       } catch (err) {
         console.error("❌ Polling error:", err);
-        console.error("Error details:", err.response?.data);
+      } finally {
+        isPolling = false; // Reset polling flag
       }
     }, 3000);
 
