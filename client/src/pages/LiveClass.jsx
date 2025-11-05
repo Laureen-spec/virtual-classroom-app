@@ -360,23 +360,22 @@ export default function LiveClass() {
 
       // Update participants list from response if provided, else fetch session
       if (response.data?.participant) {
-        // merge updated participant into participants array (replace existing entry)
+        const updated = response.data.participant;
+        const updatedId = String(updated.studentId);
         setParticipants(prev => {
-          const updated = response.data.participant;
-          // normalize studentId type to string
-          const updatedId = String(updated.studentId);
           const exists = prev.some(p => String(p.studentId) === updatedId);
           if (exists) {
-            return prev.map(p => String(p.studentId) === updatedId ? {
-              ...p,
-              // copy only the fields backend sent or that we care about
-              isMuted: updated.isMuted,
-              hasSpeakingPermission: updated.hasSpeakingPermission,
-              permissionRequested: updated.permissionRequested,
-              role: updated.role
-            } : p);
+            return prev.map(p => String(p.studentId) === updatedId
+              ? { ...p,
+                  // merge only fields you care about - keep other fields intact
+                  isMuted: updated.isMuted,
+                  hasSpeakingPermission: updated.hasSpeakingPermission,
+                  permissionRequested: updated.permissionRequested,
+                  role: updated.role
+                }
+              : p
+            );
           } else {
-            // not present — append
             return [...prev, {
               studentId: updated.studentId,
               isMuted: updated.isMuted,
@@ -423,20 +422,21 @@ export default function LiveClass() {
       debugLog("Muting student:", studentId);
       const response = await API.put(`/live/mute/${sessionId}/${studentId}`, { mute: true });
 
-      // Update participants from response if provided, else fetch
+      // after calling API and getting response.data.studentId & response.data.isMuted
       if (response.data?.studentId) {
-        setParticipants(prev => prev.map(p => String(p.studentId) === String(response.data.studentId) ? { 
-          ...p, 
-          isMuted: response.data.isMuted 
-        } : p));
+        const respId = String(response.data.studentId);
+        setParticipants(prev => prev.map(p => String(p.studentId) === respId
+          ? { ...p, isMuted: response.data.isMuted }
+          : p
+        ));
       } else {
         const sessionResponse = await API.get(`/live/session/${sessionId}`);
         if (sessionResponse.data.participants) setParticipants(sessionResponse.data.participants);
       }
 
       // If the current user was muted by the teacher, disable local audio immediately
-      const currentUserId = localStorage.getItem("userId");
-      if (studentId === currentUserId) {
+      const currentUserId = String(localStorage.getItem("userId"));
+      if (String(studentId) === currentUserId) {
         setIsMuted(true);
         if (localTracks.audio) {
           trackManagement.enableTrack(localTracks.audio, false);
@@ -456,20 +456,21 @@ export default function LiveClass() {
       debugLog("Unmuting student:", studentId);
       const response = await API.put(`/live/mute/${sessionId}/${studentId}`, { mute: false });
 
-      // Update participants list
+      // after calling API and getting response.data.studentId & response.data.isMuted
       if (response.data?.studentId) {
-        setParticipants(prev => prev.map(p => String(p.studentId) === String(response.data.studentId) ? { 
-          ...p, 
-          isMuted: response.data.isMuted 
-        } : p));
+        const respId = String(response.data.studentId);
+        setParticipants(prev => prev.map(p => String(p.studentId) === respId
+          ? { ...p, isMuted: response.data.isMuted }
+          : p
+        ));
       } else {
         const sessionResponse = await API.get(`/live/session/${sessionId}`);
         if (sessionResponse.data.participants) setParticipants(sessionResponse.data.participants);
       }
 
       // If the current user was unmuted, enable audio immediately and republish
-      const currentUserId = localStorage.getItem("userId");
-      if (studentId === currentUserId) {
+      const currentUserId = String(localStorage.getItem("userId"));
+      if (String(studentId) === currentUserId) {
         setIsMuted(false);
         if (localTracks.audio) {
           trackManagement.enableTrack(localTracks.audio, true);
@@ -502,9 +503,9 @@ export default function LiveClass() {
       if (sessionResponse.data.participants) setParticipants(sessionResponse.data.participants);
 
       // If current user is audience, ensure local audio disabled
-      const currentUserId = localStorage.getItem("userId");
-      const me = (sessionResponse.data.participants || []).find(p => p.studentId === currentUserId);
-      if (me && me.isMuted && localTracks.audio) {
+      const currentUserId = String(localStorage.getItem("userId"));
+      const currentParticipant = (participants || []).find(p => String(p.studentId) === currentUserId);
+      if (currentParticipant && currentParticipant.isMuted && localTracks.audio) {
         setIsMuted(true);
         trackManagement.enableTrack(localTracks.audio, false);
       }
@@ -524,9 +525,9 @@ export default function LiveClass() {
       if (sessionResponse.data.participants) setParticipants(sessionResponse.data.participants);
 
       // If current user now has speaking permission & unmuted, enable audio & republish
-      const currentUserId = localStorage.getItem("userId");
-      const me = (sessionResponse.data.participants || []).find(p => p.studentId === currentUserId);
-      if (me && !me.isMuted && me.hasSpeakingPermission && localTracks.audio) {
+      const currentUserId = String(localStorage.getItem("userId"));
+      const currentParticipant = (participants || []).find(p => String(p.studentId) === currentUserId);
+      if (currentParticipant && !currentParticipant.isMuted && currentParticipant.hasSpeakingPermission && localTracks.audio) {
         setIsMuted(false);
         trackManagement.enableTrack(localTracks.audio, true);
         try {
@@ -983,9 +984,9 @@ export default function LiveClass() {
         }
 
         // FIXED: More stable participant state updates
-        const currentUserId = localStorage.getItem("userId");
+        const currentUserId = String(localStorage.getItem("userId"));
         if (participants && currentUserId) {
-          const currentParticipant = participants.find(p => p.studentId === currentUserId);
+          const currentParticipant = (participants || []).find(p => String(p.studentId) === currentUserId);
           if (currentParticipant) {
             // Update mute state only if changed
             if (currentParticipant.isMuted !== isMuted) {
