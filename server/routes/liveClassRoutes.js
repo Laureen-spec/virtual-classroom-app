@@ -448,7 +448,7 @@ router.post("/request-speaking/:sessionId", verifyToken, async (req, res) => {
   }
 });
 
-// 🔹 Grant Speaking Permission (Teacher only) - ENHANCED AUDIO HANDLING
+// 🔹 Grant Speaking Permission (Teacher only) - ENHANCED AUDIO HANDLING WITH IMMEDIATE RESPONSE DATA
 router.put("/grant-speaking/:sessionId/:studentId", verifyToken, async (req, res) => {
   try {
     const { sessionId, studentId } = req.params;
@@ -515,12 +515,28 @@ router.put("/grant-speaking/:sessionId/:studentId", verifyToken, async (req, res
 
     console.log(`✅ Speaking permission granted to ${studentId} - Audio unmuted`);
 
+    // ✅ ENHANCEMENT: Force immediate participant data inclusion in response
+    const updatedParticipant = liveSession.participants.find(
+      p => p.studentId.toString() === studentId
+    );
+
     res.json({
       message: "Speaking permission granted successfully - Student can now speak",
       studentId,
       hasSpeakingPermission: true,
       isMuted: false,
-      audioState: "enabled"
+      audioState: "enabled",
+      // ✅ CRITICAL: Include immediate participant data for frontend synchronization
+      participant: {
+        studentId: updatedParticipant.studentId,
+        isMuted: updatedParticipant.isMuted,
+        hasSpeakingPermission: updatedParticipant.hasSpeakingPermission,
+        permissionRequested: updatedParticipant.permissionRequested,
+        role: updatedParticipant.role
+      },
+      // ✅ ADDITIONAL: Include timestamp for immediate updates
+      timestamp: new Date(),
+      immediateUpdate: true
     });
 
   } catch (error) {

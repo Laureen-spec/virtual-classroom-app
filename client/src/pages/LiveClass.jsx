@@ -86,7 +86,7 @@ export default function LiveClass() {
     });
   }, [isMuted, hasSpeakingPermission, localTracks.audio]);
 
-  // Enhanced toggle mute function
+  // FIXED: Enhanced toggle mute function
   const toggleMute = async () => {
     if (!localTracks.audio) {
       console.error("❌ No audio track available");
@@ -95,14 +95,18 @@ export default function LiveClass() {
 
     try {
       if (isMuted) {
-        // Try to unmute - check if we have permission
+        // If muted and trying to unmute
         if (!hasSpeakingPermission) {
-          console.log("❌ No speaking permission - requesting...");
+          console.log("🔔 No speaking permission - requesting...");
           await requestSpeakingPermission();
+          
+          // Don't return here - wait for permission and then unmute
+          // The polling will handle the actual unmute when permission is granted
           return;
         }
         
-        console.log("🎯 Unmuting with permission...");
+        // If we have permission, proceed with unmute
+        console.log("🎤 Unmuting with permission...");
         await API.put(`/live/self-unmute/${sessionId}`);
         localTracks.audio.setEnabled(true);
         setIsMuted(false);
@@ -110,6 +114,7 @@ export default function LiveClass() {
         
       } else {
         // Muting is always allowed
+        console.log("🔇 Muting...");
         await API.put(`/live/self-mute/${sessionId}`);
         localTracks.audio.setEnabled(false);
         setIsMuted(true);
@@ -118,6 +123,37 @@ export default function LiveClass() {
     } catch (err) {
       console.error("❌ Toggle mute failed:", err);
       alert(err.response?.data?.message || "Failed to toggle audio");
+    }
+  };
+
+  // Add this function to handle immediate permission updates
+  const handleImmediatePermissionUpdate = async (studentId, hasPermission) => {
+    try {
+      // Force update the participants list
+      const sessionResponse = await API.get(`/live/session/${sessionId}`);
+      if (sessionResponse.data.participants) {
+        setParticipants(sessionResponse.data.participants);
+      }
+      
+      // If it's the current user, force audio update
+      if (studentId === localStorage.getItem("userId") && hasPermission && localTracks.audio) {
+        console.log("🎯 Immediate audio update for permission grant");
+        localTracks.audio.setEnabled(true);
+        setIsMuted(false);
+        
+        // Republish audio track
+        setTimeout(async () => {
+          try {
+            await client.unpublish(localTracks.audio);
+            await client.publish(localTracks.audio);
+            console.log("✅ Audio track immediately republished");
+          } catch (error) {
+            console.error("❌ Immediate audio republish failed:", error);
+          }
+        }, 100);
+      }
+    } catch (error) {
+      console.error("❌ Immediate permission update failed:", error);
     }
   };
 
@@ -530,7 +566,7 @@ export default function LiveClass() {
           console.log("📋 Pending requests:", pending.length);
         }
 
-        // ENHANCED: Update local state based on participant info with proper audio handling
+        // FIXED: Enhanced permission handling in polling
         const currentUserId = localStorage.getItem("userId");
         if (participants && currentUserId) {
           const currentParticipant = participants.find(p => p.studentId === currentUserId);
@@ -550,26 +586,39 @@ export default function LiveClass() {
               }
             }
             
-            // Update speaking permission
+            // FIXED: Enhanced permission handling with immediate audio updates
             if (currentParticipant.hasSpeakingPermission !== hasSpeakingPermission) {
+              const oldPermission = hasSpeakingPermission;
               setHasSpeakingPermission(currentParticipant.hasSpeakingPermission);
               console.log(`🎤 Speaking permission ${currentParticipant.hasSpeakingPermission ? 'granted' : 'revoked'}`);
               
-              // CRITICAL: When permission is granted, ensure audio is enabled
+              // CRITICAL: When permission is granted, ensure audio is properly enabled
               if (currentParticipant.hasSpeakingPermission && localTracks.audio) {
-                console.log("🎯 Permission granted - enabling audio track");
+                console.log("🎯 Permission granted - enabling audio track immediately");
+                
+                // Force enable the audio track
                 localTracks.audio.setEnabled(true);
                 
-                // Republish audio track to ensure it's active
-                setTimeout(async () => {
-                  try {
-                    await client.unpublish(localTracks.audio);
-                    await client.publish(localTracks.audio);
-                    console.log("✅ Audio track republished after permission grant");
-                  } catch (error) {
-                    console.error("❌ Error republishing audio:", error);
+                // CRITICAL: Republish audio track to ensure it's active for all users
+                try {
+                  await client.unpublish(localTracks.audio);
+                  await client.publish(localTracks.audio);
+                  console.log("✅ Audio track republished after permission grant");
+                  
+                  // Also update mute state if needed
+                  if (isMuted) {
+                    setIsMuted(false);
                   }
-                }, 500);
+                } catch (error) {
+                  console.error("❌ Error republishing audio:", error);
+                }
+              }
+              
+              // If permission was revoked, mute the audio
+              if (!currentParticipant.hasSpeakingPermission && localTracks.audio && oldPermission) {
+                console.log("🔇 Permission revoked - muting audio");
+                localTracks.audio.setEnabled(false);
+                setIsMuted(true);
               }
             }
             
@@ -631,15 +680,20 @@ export default function LiveClass() {
     }
   };
 
-  // Teacher controls with enhanced permission checking
+  // FIXED: Teacher controls with enhanced permission checking
   const grantSpeakingPermission = async (studentId) => {
     try {
       console.log("🎯 Granting permission to:", studentId);
-      console.log("🎯 Current user is teacher:", isTeacher);
       
-      await API.put(`/live/grant-speaking/${sessionId}/${studentId}`);
+      const response = await API.put(`/live/grant-speaking/${sessionId}/${studentId}`);
+      console.log("✅ Permission granted response:", response.data);
+      
+      // Update UI immediately
       setPendingRequests(prev => prev.filter(req => req.studentId !== studentId));
-      console.log("✅ Permission granted successfully");
+      
+      // Force immediate update
+      await handleImmediatePermissionUpdate(studentId, true);
+      
     } catch (err) {
       console.error("❌ Grant permission failed:", err);
       alert(err.response?.data?.message || "Failed to grant permission");
@@ -668,12 +722,27 @@ export default function LiveClass() {
     }
   };
 
+  // FIXED: Enhanced unmute student function
   const unmuteStudent = async (studentId) => {
     try {
       console.log("🔊 Unmuting student:", studentId);
-      await API.put(`/live/mute/${sessionId}/${studentId}`, { mute: false });
+      console.log("👨‍🏫 Current user is teacher:", isTeacher);
+      
+      const response = await API.put(`/live/mute/${sessionId}/${studentId}`, { 
+        mute: false 
+      });
+      
+      console.log("✅ Student unmuted via API:", response.data);
+      
+      // Force immediate UI update by refreshing participant data
+      const sessionResponse = await API.get(`/live/session/${sessionId}`);
+      if (sessionResponse.data.participants) {
+        setParticipants(sessionResponse.data.participants);
+      }
+      
     } catch (err) {
       console.error("❌ Unmute student failed:", err);
+      console.error("Error details:", err.response?.data);
       alert(err.response?.data?.message || "Failed to unmute student");
     }
   };
