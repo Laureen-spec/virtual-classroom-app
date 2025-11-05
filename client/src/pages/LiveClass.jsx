@@ -373,6 +373,20 @@ export default function LiveClass() {
     }
   };
 
+  // Adjust audio volume for all remote users
+  const adjustRemoteAudioVolume = (volume = 50) => {
+    remoteUsers.forEach(user => {
+      if (user.audioTrack) {
+        user.audioTrack.setVolume(volume);
+      }
+    });
+  };
+
+  // Call this after remote users join
+  useEffect(() => {
+    adjustRemoteAudioVolume(50); // Set to 50% volume
+  }, [remoteUsers]);
+
   // UPDATED: Fetch session info and join class with proper microphone permission
   const joinClass = async () => {
     try {
@@ -437,9 +451,22 @@ export default function LiveClass() {
       // Join Agora channel
       const uid = await client.join(appId, session.channelName, agoraToken, null);
 
-      // Create local tracks with proper error handling
+      // Create local tracks with audio optimization
       console.log("🎤 Creating microphone and camera tracks...");
-      const [audioTrack, videoTrack] = await AgoraRTC.createMicrophoneAndCameraTracks({}, {});
+      const [audioTrack, videoTrack] = await AgoraRTC.createMicrophoneAndCameraTracks(
+        {
+          // Audio optimization to reduce echo
+          AEC: true, // Acoustic Echo Cancellation
+          ANS: true, // Automatic Noise Suppression  
+          AGC: true, // Automatic Gain Control
+          encoderConfig: {
+            sampleRate: 48000,
+            stereo: false,
+            bitrate: 64
+          }
+        }, 
+        {}
+      );
       
       console.log("✅ Tracks created:", {
         audioEnabled: audioTrack.enabled,
@@ -594,6 +621,7 @@ export default function LiveClass() {
               setIsMuted(currentParticipant.isMuted);
               if (localTracks.audio) {
                 localTracks.audio.setEnabled(!currentParticipant.isMuted);
+                console.log(`🔊 Audio ${currentParticipant.isMuted ? 'muted' : 'unmuted'} via polling`);
               }
             }
             
@@ -728,19 +756,39 @@ export default function LiveClass() {
     }
   };
 
+  // FIXED: Mute All Students function
   const muteAllStudents = async () => {
     try {
-      await API.put(`/live/mute-all/${sessionId}`);
+      console.log("🔇 Muting all students...");
+      const response = await API.put(`/live/mute-all/${sessionId}`);
+      console.log("✅ All students muted:", response.data);
+      
+      // Force immediate UI update
+      const sessionResponse = await API.get(`/live/session/${sessionId}`);
+      if (sessionResponse.data.participants) {
+        setParticipants(sessionResponse.data.participants);
+      }
     } catch (err) {
-      console.error("Mute all failed:", err);
+      console.error("❌ Mute all failed:", err);
+      alert(err.response?.data?.message || "Failed to mute all students");
     }
   };
 
+  // FIXED: Unmute All Students function
   const unmuteAllStudents = async () => {
     try {
-      await API.put(`/live/unmute-all/${sessionId}`);
+      console.log("🔊 Unmuting all students...");
+      const response = await API.put(`/live/unmute-all/${sessionId}`);
+      console.log("✅ All students unmuted:", response.data);
+      
+      // Force immediate UI update
+      const sessionResponse = await API.get(`/live/session/${sessionId}`);
+      if (sessionResponse.data.participants) {
+        setParticipants(sessionResponse.data.participants);
+      }
     } catch (err) {
-      console.error("Unmute all failed:", err);
+      console.error("❌ Unmute all failed:", err);
+      alert(err.response?.data?.message || "Failed to unmute all students");
     }
   };
 
