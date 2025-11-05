@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import AgoraRTC from "agora-rtc-sdk-ng";
+import AgoraRTM from "agora-rtm-sdk";
 import API from "../api/axios";
 
 export default function LiveClass() {
@@ -53,6 +54,11 @@ export default function LiveClass() {
 
   const appId = import.meta.env.VITE_AGORA_APP_ID;
   const client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
+  
+  // RTM Refs
+  const rtmClientRef = useRef(null);
+  const rtmChannelRef = useRef(null);
+  
   const chatContainerRef = useRef(null);
 
   // Track management utilities
@@ -410,6 +416,17 @@ export default function LiveClass() {
         }
       }
 
+      // Send RTM message for force unmute
+      if (rtmChannelRef.current) {
+        rtmChannelRef.current.sendMessage({ 
+          text: JSON.stringify({ 
+            type: "FORCE_UNMUTE", 
+            target: studentId, 
+            allowSelfUnmute: true 
+          }) 
+        });
+      }
+
     } catch (err) {
       console.error("❌ Grant permission failed:", err);
       alert(err.response?.data?.message || "Failed to grant permission");
@@ -441,6 +458,16 @@ export default function LiveClass() {
         if (localTracks.audio) {
           trackManagement.enableTrack(localTracks.audio, false);
         }
+      }
+
+      // Send RTM message for force mute
+      if (rtmChannelRef.current) {
+        rtmChannelRef.current.sendMessage({ 
+          text: JSON.stringify({ 
+            type: "FORCE_MUTE", 
+            target: studentId 
+          }) 
+        });
       }
 
       debugLog("Student muted");
@@ -485,6 +512,17 @@ export default function LiveClass() {
         }
       }
 
+      // Send RTM message for force unmute
+      if (rtmChannelRef.current) {
+        rtmChannelRef.current.sendMessage({ 
+          text: JSON.stringify({ 
+            type: "FORCE_UNMUTE", 
+            target: studentId, 
+            allowSelfUnmute: false 
+          }) 
+        });
+      }
+
       debugLog("Student unmuted via API");
     } catch (err) {
       console.error("❌ Unmute student failed:", err);
@@ -508,6 +546,16 @@ export default function LiveClass() {
       if (currentParticipant && currentParticipant.isMuted && localTracks.audio) {
         setIsMuted(true);
         trackManagement.enableTrack(localTracks.audio, false);
+      }
+
+      // Send RTM message to all for force mute
+      if (rtmChannelRef.current) {
+        rtmChannelRef.current.sendMessage({ 
+          text: JSON.stringify({ 
+            type: "FORCE_MUTE", 
+            target: "ALL" 
+          }) 
+        });
       }
     } catch (err) {
       console.error("❌ Mute all failed:", err);
@@ -536,6 +584,17 @@ export default function LiveClass() {
         } catch (err) {
           console.error("Error republishing after unmute all:", err);
         }
+      }
+
+      // Send RTM message to all for force unmute
+      if (rtmChannelRef.current) {
+        rtmChannelRef.current.sendMessage({ 
+          text: JSON.stringify({ 
+            type: "FORCE_UNMUTE", 
+            target: "ALL",
+            allowSelfUnmute: true
+          }) 
+        });
       }
     } catch (err) {
       console.error("❌ Unmute all failed:", err);
@@ -772,6 +831,49 @@ export default function LiveClass() {
     adjustRemoteAudioVolume(50); // Set to 50% volume
   }, [remoteUsers]);
 
+  // Initialize RTM and setup message handling
+  const initializeRTM = async () => {
+    try {
+      rtmClientRef.current = AgoraRTM.createInstance(appId);
+      await rtmClientRef.current.login({ uid: String(localStorage.getItem("userId")) });
+      
+      // create and join channel (use same sessionId or channelName)
+      rtmChannelRef.current = await rtmClientRef.current.createChannel(sessionId.toString());
+      await rtmChannelRef.current.join();
+
+      // listen for channel messages
+      rtmChannelRef.current.on("ChannelMessage", async (message, senderId) => {
+        try {
+          const data = typeof message === "string" ? JSON.parse(message) : message;
+          if (!data || !data.type) return;
+
+          // only handle messages targeted to this user
+          const target = String(data.target);
+          const myId = String(localStorage.getItem("userId"));
+          if (target !== myId && data.target !== "ALL") return;
+
+          if (data.type === "FORCE_MUTE") {
+            if (localTracks.audio) {
+              trackManagement.enableTrack(localTracks.audio, false);
+              setIsMuted(true);
+            }
+          } else if (data.type === "FORCE_UNMUTE") {
+            if (localTracks.audio && data.allowSelfUnmute === true) {
+              trackManagement.enableTrack(localTracks.audio, true);
+              setIsMuted(false);
+            }
+          }
+        } catch (e) {
+          console.error("RTM message handling error", e);
+        }
+      });
+      
+      debugLog("RTM initialized and joined channel");
+    } catch (error) {
+      console.error("RTM initialization failed:", error);
+    }
+  };
+
   // Fetch session info and join class with cleaned logs and track utilities
   const joinClass = async () => {
     try {
@@ -832,6 +934,9 @@ export default function LiveClass() {
       // Join Agora channel
       const uid = await client.join(appId, session.channelName, agoraToken, null);
 
+      // Initialize RTM
+      await initializeRTM();
+
       // Create local tracks with audio optimization
       debugLog("Creating microphone and camera tracks...");
       const [audioTrack, videoTrack] = await AgoraRTC.createMicrophoneAndCameraTracks(
@@ -851,13 +956,27 @@ export default function LiveClass() {
       
       debugLog("Tracks created");
 
-      // FIX: Always enable audio track initially, control via publishing
-      trackManagement.enableTrack(audioTrack, true);
-      debugLog("Audio track created and enabled");
+      // --- after tracks created ---
+      // If backend says user is muted, ensure local audio is disabled
+      const shouldBeMuted = !!participantInfo?.isMuted; // from joinResponse
+      if (shouldBeMuted) {
+        // keep audio disabled and still store track (so we can enable later)
+        trackManagement.enableTrack(audioTrack, false);
+        setIsMuted(true);
+      } else {
+        trackManagement.enableTrack(audioTrack, true);
+        setIsMuted(false);
+      }
 
-      // Store mute state but don't disable track - control via Agora publishing
-      setIsMuted(participantInfo.isMuted);
+      // Publish video always (if available)
+      await trackManagement.publishTrack(client, videoTrack);
 
+      // Publish audio only if not muted
+      if (!shouldBeMuted) {
+        await trackManagement.publishTrack(client, audioTrack);
+      }
+
+      // store tracks
       setLocalTracks({ audio: audioTrack, video: videoTrack });
       videoTrack.play("local-player");
 
@@ -887,12 +1006,6 @@ export default function LiveClass() {
         debugLog("User left:", user.uid);
         setRemoteUsers((prev) => prev.filter((u) => u.uid !== user.uid));
       });
-
-      // Publish tracks using track utilities
-      debugLog("Publishing audio and video tracks...");
-      await trackManagement.publishTrack(client, audioTrack);
-      await trackManagement.publishTrack(client, videoTrack);
-      debugLog("Tracks published successfully");
       
       setJoined(true);
 
@@ -1109,6 +1222,14 @@ export default function LiveClass() {
         await stopScreenShare();
       }
       
+      // Leave RTM
+      if (rtmChannelRef.current) {
+        await rtmChannelRef.current.leave();
+      }
+      if (rtmClientRef.current) {
+        await rtmClientRef.current.logout();
+      }
+      
       localTracks.audio?.close();
       localTracks.video?.close();
       await client.leave();
@@ -1133,6 +1254,14 @@ export default function LiveClass() {
       // Stop screen sharing if active
       if (screenShareTrack) {
         screenShareTrack.close();
+      }
+      
+      // Leave RTM
+      if (rtmChannelRef.current) {
+        rtmChannelRef.current.leave();
+      }
+      if (rtmClientRef.current) {
+        rtmClientRef.current.logout();
       }
       
       localTracks.audio?.close();
