@@ -274,13 +274,29 @@ export default function LiveClass() {
     setIsMuteLoading(true);
     try {
       if (isMuted) {
-        // If muted and trying to unmute
+        // If current user is teacher, allow immediate unmute without permission check
+        const role = localStorage.getItem("role");
+        if (role === "teacher") {
+          debugLog("Teacher unmuting themselves (bypass permission).");
+          // call backend self-unmute just to keep DB in sync (if you have endpoint that handles teacher)
+          try {
+            await API.put(`/live/self-unmute/${sessionId}`);
+          } catch (e) {
+            // ignore backend sync failure for immediate local unmute
+            debugLog("Warning: backend self-unmute failed:", e?.message || e);
+          }
+          trackManagement.enableTrack(localTracks.audio, true);
+          setIsMuted(false);
+          return;
+        }
+
+        // For students: only unmute if they have permission
         if (!hasSpeakingPermission) {
-          debugLog("🔔 No speaking permission - requesting...");
+          debugLog("🔔 No speaking permission - requesting.");
           await requestSpeakingPermission();
         } else {
           // If we have permission, proceed with unmute
-          debugLog("🎤 Unmuting with permission...");
+          debugLog("🎤 Unmuting with permission.");
           await API.put(`/live/self-unmute/${sessionId}`);
           trackManagement.enableTrack(localTracks.audio, true);
           setIsMuted(false);
@@ -344,17 +360,34 @@ export default function LiveClass() {
 
       // Update participants list from response if provided, else fetch session
       if (response.data?.participant) {
+        // merge updated participant into participants array (replace existing entry)
         setParticipants(prev => {
-          const other = prev.filter(p => p.studentId !== response.data.participant.studentId);
-          return [...other, {
-            studentId: response.data.participant.studentId,
-            isMuted: response.data.participant.isMuted,
-            hasSpeakingPermission: response.data.participant.hasSpeakingPermission,
-            permissionRequested: response.data.participant.permissionRequested,
-            role: response.data.participant.role
-          }];
+          const updated = response.data.participant;
+          // normalize studentId type to string
+          const updatedId = String(updated.studentId);
+          const exists = prev.some(p => String(p.studentId) === updatedId);
+          if (exists) {
+            return prev.map(p => String(p.studentId) === updatedId ? {
+              ...p,
+              // copy only the fields backend sent or that we care about
+              isMuted: updated.isMuted,
+              hasSpeakingPermission: updated.hasSpeakingPermission,
+              permissionRequested: updated.permissionRequested,
+              role: updated.role
+            } : p);
+          } else {
+            // not present — append
+            return [...prev, {
+              studentId: updated.studentId,
+              isMuted: updated.isMuted,
+              hasSpeakingPermission: updated.hasSpeakingPermission,
+              permissionRequested: updated.permissionRequested,
+              role: updated.role
+            }];
+          }
         });
       } else {
+        // fallback: fetch fresh participants from session
         const sessionResponse = await API.get(`/live/session/${sessionId}`);
         if (sessionResponse.data.participants) setParticipants(sessionResponse.data.participants);
       }
@@ -392,7 +425,10 @@ export default function LiveClass() {
 
       // Update participants from response if provided, else fetch
       if (response.data?.studentId) {
-        setParticipants(prev => prev.map(p => p.studentId === response.data.studentId ? { ...p, isMuted: response.data.isMuted } : p));
+        setParticipants(prev => prev.map(p => String(p.studentId) === String(response.data.studentId) ? { 
+          ...p, 
+          isMuted: response.data.isMuted 
+        } : p));
       } else {
         const sessionResponse = await API.get(`/live/session/${sessionId}`);
         if (sessionResponse.data.participants) setParticipants(sessionResponse.data.participants);
@@ -422,7 +458,10 @@ export default function LiveClass() {
 
       // Update participants list
       if (response.data?.studentId) {
-        setParticipants(prev => prev.map(p => p.studentId === response.data.studentId ? { ...p, isMuted: response.data.isMuted } : p));
+        setParticipants(prev => prev.map(p => String(p.studentId) === String(response.data.studentId) ? { 
+          ...p, 
+          isMuted: response.data.isMuted 
+        } : p));
       } else {
         const sessionResponse = await API.get(`/live/session/${sessionId}`);
         if (sessionResponse.data.participants) setParticipants(sessionResponse.data.participants);
