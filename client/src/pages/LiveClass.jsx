@@ -29,9 +29,93 @@ export default function LiveClass() {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingStatus, setRecordingStatus] = useState(null);
 
+  // NEW: Pagination state variables
+  const [chatPage, setChatPage] = useState(1);
+  const [hasMoreChat, setHasMoreChat] = useState(true);
+  const [isLoadingChat, setIsLoadingChat] = useState(false);
+
+  // NEW: Session timeout state variables
+  const [lastActivity, setLastActivity] = useState(Date.now());
+  const [showTimeoutWarning, setShowTimeoutWarning] = useState(false);
+
   const appId = import.meta.env.VITE_AGORA_APP_ID;
   const client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
   const chatContainerRef = useRef(null);
+
+  // NEW: Input sanitization function
+  const sanitizeMessage = (text) => {
+    return text
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#x27;')
+      .replace(/\//g, '&#x2F;')
+      .trim();
+  };
+
+  // NEW: Load more chat messages function
+  const loadMoreChat = async () => {
+    if (isLoadingChat || !hasMoreChat) return;
+    
+    setIsLoadingChat(true);
+    try {
+      const nextPage = chatPage + 1;
+      const response = await API.get(`/live/session/${sessionId}?page=${nextPage}&limit=50`);
+      
+      if (response.data.chatMessages && response.data.chatMessages.length > 0) {
+        setChatMessages(prev => [...response.data.chatMessages, ...prev]);
+        setChatPage(nextPage);
+        setHasMoreChat(response.data.pagination?.hasNext || false);
+      } else {
+        setHasMoreChat(false);
+      }
+    } catch (err) {
+      console.error("Error loading more chat messages:", err);
+    } finally {
+      setIsLoadingChat(false);
+    }
+  };
+
+  // NEW: Activity tracker for session timeout
+  useEffect(() => {
+    const activities = ['mousemove', 'keypress', 'click', 'scroll'];
+    const updateActivity = () => {
+      setLastActivity(Date.now());
+      setShowTimeoutWarning(false);
+    };
+
+    activities.forEach(activity => {
+      document.addEventListener(activity, updateActivity);
+    });
+
+    return () => {
+      activities.forEach(activity => {
+        document.removeEventListener(activity, updateActivity);
+      });
+    };
+  }, []);
+
+  // NEW: Timeout checker
+  useEffect(() => {
+    const CHECK_INTERVAL = 30000; // 30 seconds
+    const WARNING_TIME = 1200000; // 20 minutes
+    const TIMEOUT_TIME = 1800000; // 30 minutes
+
+    const interval = setInterval(() => {
+      const inactiveTime = Date.now() - lastActivity;
+      
+      if (inactiveTime > TIMEOUT_TIME && joined) {
+        // Auto-leave after 30 minutes of inactivity
+        leaveClass();
+        alert("Session ended due to inactivity");
+      } else if (inactiveTime > WARNING_TIME && !showTimeoutWarning && joined) {
+        // Show warning after 20 minutes
+        setShowTimeoutWarning(true);
+      }
+    }, CHECK_INTERVAL);
+
+    return () => clearInterval(interval);
+  }, [lastActivity, showTimeoutWarning, joined]);
 
   // Monitor network stability
   useEffect(() => {
@@ -677,12 +761,13 @@ export default function LiveClass() {
     }
   };
 
-  // Send chat message
+  // UPDATED: Send chat message with input sanitization
   const sendMessage = async () => {
     if (!newMessage.trim()) return;
 
     try {
-      await API.post(`/live/chat/${sessionId}`, { message: newMessage });
+      const sanitizedMessage = sanitizeMessage(newMessage);
+      await API.post(`/live/chat/${sessionId}`, { message: sanitizedMessage });
       setNewMessage("");
     } catch (err) {
       console.error("Send message failed:", err);
@@ -878,6 +963,25 @@ export default function LiveClass() {
 
   return (
     <div className="min-h-screen bg-gray-900 text-white">
+      {/* NEW: Timeout Warning Modal */}
+      {showTimeoutWarning && (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+          <div className="bg-gray-800 p-6 rounded-lg max-w-md">
+            <h3 className="text-lg font-semibold mb-4">Session Timeout Warning</h3>
+            <p className="mb-4">Your session will end in 10 minutes due to inactivity.</p>
+            <button
+              onClick={() => {
+                setLastActivity(Date.now());
+                setShowTimeoutWarning(false);
+              }}
+              className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded w-full"
+            >
+              Continue Session
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="bg-gray-800 p-4 flex justify-between items-center">
         <div>
@@ -1191,11 +1295,24 @@ export default function LiveClass() {
             </div>
           </div>
           
-          {/* Chat Messages */}
+          {/* UPDATED: Chat Messages with Pagination */}
           <div 
             ref={chatContainerRef}
             className="flex-1 p-4 overflow-y-auto space-y-3"
           >
+            {/* NEW: Load More Button */}
+            {hasMoreChat && (
+              <div className="text-center mb-4">
+                <button
+                  onClick={loadMoreChat}
+                  disabled={isLoadingChat}
+                  className="bg-gray-600 hover:bg-gray-700 px-3 py-1 rounded text-sm disabled:opacity-50"
+                >
+                  {isLoadingChat ? "Loading..." : "Load Older Messages"}
+                </button>
+              </div>
+            )}
+
             {chatMessages.length === 0 ? (
               <div className="text-center text-gray-500 py-8">
                 <p>No messages yet</p>
@@ -1221,7 +1338,7 @@ export default function LiveClass() {
             )}
           </div>
 
-          {/* Message Input */}
+          {/* UPDATED: Message Input with sanitization */}
           <div className="p-4 border-t border-gray-700">
             <div className="flex space-x-2">
               <input

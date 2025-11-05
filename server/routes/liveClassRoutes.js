@@ -867,14 +867,16 @@ router.get("/pending-requests/:sessionId", verifyToken, async (req, res) => {
   }
 });
 
-// 🔹 Enhanced Get Session Info (FIXED session status detection)
+// 🔹 Enhanced Get Session Info (FIXED session status detection) - UPDATED WITH PAGINATION
 router.get("/session/:sessionId", verifyToken, async (req, res) => {
   try {
     const { sessionId } = req.params;
+    const { page = 1, limit = 50 } = req.query; // NEW: Add pagination params
 
     console.log("🔍 DEBUG: Fetching session info for:", sessionId);
     console.log("🔍 DEBUG: Request user ID:", req.user.id);
     console.log("🔍 DEBUG: Request user role:", req.user.role);
+    console.log("🔍 DEBUG: Pagination params - page:", page, "limit:", limit); // NEW: Log pagination
 
     const liveSession = await LiveSession.findById(sessionId)
       .populate("classId", "title description")
@@ -899,6 +901,28 @@ router.get("/session/:sessionId", verifyToken, async (req, res) => {
 
     console.log("🔍 DEBUG: User is teacher:", isUserTeacher);
     console.log("🔍 DEBUG: User is admin:", isUserAdmin);
+
+    // NEW: Calculate pagination for chat messages
+    const totalMessages = liveSession.chatMessages.length;
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const startIndex = (pageNum - 1) * limitNum;
+    const endIndex = pageNum * limitNum;
+    
+    // Sort messages by timestamp (newest first) and paginate
+    const paginatedMessages = liveSession.chatMessages
+      .slice()
+      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+      .slice(startIndex, endIndex);
+
+    console.log("🔍 DEBUG: Chat pagination -", {
+      totalMessages,
+      page: pageNum,
+      limit: limitNum,
+      startIndex,
+      endIndex,
+      returnedMessages: paginatedMessages.length
+    });
 
     // ✅ FIXED: Ensure isActive is properly set in response
     const responseData = {
@@ -928,7 +952,8 @@ router.get("/session/:sessionId", verifyToken, async (req, res) => {
         joinedAt: p.joinedAt,
         isScreenSharing: p.isScreenSharing
       })),
-      chatMessages: liveSession.chatMessages.map(m => ({
+      // UPDATED: Return paginated chat messages
+      chatMessages: paginatedMessages.map(m => ({
         userName: m.userId?.name || "System",
         message: m.message,
         timestamp: m.timestamp,
@@ -950,12 +975,22 @@ router.get("/session/:sessionId", verifyToken, async (req, res) => {
         isAdmin: isUserAdmin,
         canManageSession: isUserTeacher || isUserAdmin,
         userId: req.user.id
+      },
+      // NEW: Add pagination info
+      pagination: {
+        currentPage: pageNum,
+        totalPages: Math.ceil(totalMessages / limitNum),
+        totalMessages,
+        hasNext: endIndex < totalMessages,
+        hasPrev: startIndex > 0,
+        limit: limitNum
       }
     };
 
     console.log("🔍 DEBUG: Sending response with", responseData.chatMessages.length, "chat messages");
     console.log("🔍 DEBUG: First chat message:", responseData.chatMessages[0]);
     console.log("🔍 DEBUG: Session isActive in response:", responseData.session.isActive);
+    console.log("🔍 DEBUG: Pagination info:", responseData.pagination); // NEW: Log pagination
 
     res.json(responseData);
 
