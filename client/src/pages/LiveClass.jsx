@@ -38,6 +38,14 @@ export default function LiveClass() {
   const [lastActivity, setLastActivity] = useState(Date.now());
   const [showTimeoutWarning, setShowTimeoutWarning] = useState(false);
 
+  // NEW: Loading states
+  const [isMuteLoading, setIsMuteLoading] = useState(false);
+  const [isVideoLoading, setIsVideoLoading] = useState(false);
+  const [isHandRaiseLoading, setIsHandRaiseLoading] = useState(false);
+  const [isScreenShareLoading, setIsScreenShareLoading] = useState(false);
+  const [isRecordingLoading, setIsRecordingLoading] = useState(false);
+  const [isJoinLoading, setIsJoinLoading] = useState(false);
+
   const appId = import.meta.env.VITE_AGORA_APP_ID;
   const client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
   const chatContainerRef = useRef(null);
@@ -189,13 +197,11 @@ export default function LiveClass() {
     });
   }, [isMuted, hasSpeakingPermission, localTracks.audio]);
 
-  // FIXED: Enhanced toggle mute function
+  // UPDATED: Enhanced toggle mute function with loading state
   const toggleMute = async () => {
-    if (!localTracks.audio) {
-      console.error("❌ No audio track available");
-      return;
-    }
+    if (!localTracks.audio || isMuteLoading) return;
 
+    setIsMuteLoading(true);
     try {
       if (isMuted) {
         // If muted and trying to unmute
@@ -223,6 +229,8 @@ export default function LiveClass() {
     } catch (err) {
       console.error("❌ Toggle mute failed:", err);
       alert(err.response?.data?.message || "Failed to toggle audio");
+    } finally {
+      setIsMuteLoading(false);
     }
   };
 
@@ -257,13 +265,15 @@ export default function LiveClass() {
     }
   };
 
-  // Start Screen Sharing
+  // UPDATED: Start Screen Sharing with loading state
   const startScreenShare = async () => {
     try {
       if (!isTeacher) {
         alert("Only teachers can share screen");
         return;
       }
+
+      setIsScreenShareLoading(true);
 
       // Create screen share track
       const screenTrack = await AgoraRTC.createScreenVideoTrack({
@@ -305,12 +315,16 @@ export default function LiveClass() {
       } else {
         alert("Failed to start screen sharing: " + (err.message || "Unknown error"));
       }
+    } finally {
+      setIsScreenShareLoading(false);
     }
   };
 
-  // Stop Screen Sharing
+  // UPDATED: Stop Screen Sharing with loading state
   const stopScreenShare = async () => {
     try {
+      setIsScreenShareLoading(true);
+
       if (screenShareTrack) {
         // Unpublish screen share track
         await client.unpublish(screenShareTrack);
@@ -333,10 +347,12 @@ export default function LiveClass() {
     } catch (err) {
       console.error("Stop screen share failed:", err);
       alert("Failed to stop screen sharing");
+    } finally {
+      setIsScreenShareLoading(false);
     }
   };
 
-  // Toggle Screen Sharing
+  // UPDATED: Toggle Screen Sharing with loading state
   const toggleScreenShare = async () => {
     if (isScreenSharing) {
       await stopScreenShare();
@@ -345,11 +361,12 @@ export default function LiveClass() {
     }
   };
 
-  // Toggle Video On/Off
+  // UPDATED: Toggle Video On/Off with loading state
   const toggleVideo = async () => {
-    try {
-      if (!localTracks.video) return;
+    if (!localTracks.video || isVideoLoading) return;
 
+    setIsVideoLoading(true);
+    try {
       const newVideoState = !isVideoOn;
 
       // Just toggle camera locally
@@ -357,10 +374,12 @@ export default function LiveClass() {
       setIsVideoOn(newVideoState);
     } catch (err) {
       console.error("Toggle video failed:", err);
+    } finally {
+      setIsVideoLoading(false);
     }
   };
 
-  // Recording functions
+  // UPDATED: Recording functions with loading states
   const startRecording = async () => {
     try {
       if (!isTeacher) {
@@ -368,6 +387,7 @@ export default function LiveClass() {
         return;
       }
 
+      setIsRecordingLoading(true);
       const response = await API.post(`/live/recording/start/${sessionId}`);
       setIsRecording(true);
       setRecordingStatus(response.data.recording);
@@ -376,6 +396,8 @@ export default function LiveClass() {
     } catch (err) {
       console.error("Start recording failed:", err);
       alert(err.response?.data?.message || "Failed to start recording");
+    } finally {
+      setIsRecordingLoading(false);
     }
   };
 
@@ -386,6 +408,7 @@ export default function LiveClass() {
         return;
       }
 
+      setIsRecordingLoading(true);
       const response = await API.post(`/live/recording/stop/${sessionId}`);
       setIsRecording(false);
       setRecordingStatus(response.data.recording);
@@ -394,6 +417,8 @@ export default function LiveClass() {
     } catch (err) {
       console.error("Stop recording failed:", err);
       alert(err.response?.data?.message || "Failed to stop recording");
+    } finally {
+      setIsRecordingLoading(false);
     }
   };
 
@@ -471,9 +496,10 @@ export default function LiveClass() {
     adjustRemoteAudioVolume(50); // Set to 50% volume
   }, [remoteUsers]);
 
-  // UPDATED: Fetch session info and join class with proper microphone permission
+  // UPDATED: Fetch session info and join class with proper microphone permission and improved error handling
   const joinClass = async () => {
     try {
+      setIsJoinLoading(true);
       console.log("🔄 Attempting to join class...");
       console.log("📋 Session ID:", sessionId);
       console.log("👤 User Role:", localStorage.getItem("role"));
@@ -623,14 +649,24 @@ export default function LiveClass() {
       console.error("❌ Error response:", err.response?.data);
       console.error("❌ Error status:", err.response?.status);
       
+      let errorMessage = "Failed to join class. Please try again.";
+      
       if (err.response?.status === 401) {
-        alert("Authentication failed. Please log in again.");
+        errorMessage = "Authentication failed. Please log in again.";
         navigate("/register");
       } else if (err.response?.status === 404) {
-        alert("Live session not found or has ended.");
-      } else {
-        alert("Failed to join class: " + (err.response?.data?.message || err.message));
+        errorMessage = "Live session not found or has ended.";
+      } else if (err.response?.status === 403) {
+        errorMessage = "You don't have permission to join this session.";
+      } else if (err.name === 'NotAllowedError') {
+        errorMessage = "Microphone and camera access is required. Please allow permissions and try again.";
+      } else if (err.message?.includes('NETWORK_ERROR')) {
+        errorMessage = "Network error. Please check your internet connection.";
       }
+      
+      alert(errorMessage);
+    } finally {
+      setIsJoinLoading(false);
     }
   };
 
@@ -739,14 +775,19 @@ export default function LiveClass() {
     };
   };
 
-  // Raise/lower hand
+  // UPDATED: Raise/lower hand with loading state
   const toggleHandRaise = async () => {
+    if (isHandRaiseLoading) return;
+    
+    setIsHandRaiseLoading(true);
     try {
       const action = isHandRaised ? "lower" : "raise";
       await API.put(`/live/hand/${sessionId}`, { action });
       setIsHandRaised(!isHandRaised);
     } catch (err) {
       console.error("Toggle hand raise failed:", err);
+    } finally {
+      setIsHandRaiseLoading(false);
     }
   };
 
@@ -975,6 +1016,7 @@ export default function LiveClass() {
                 setShowTimeoutWarning(false);
               }}
               className="bg-green-600 hover:bg-green-700 px-4 py-2 rounded w-full"
+              aria-label="Continue session and reset timeout timer"
             >
               Continue Session
             </button>
@@ -1007,54 +1049,66 @@ export default function LiveClass() {
           {isTeacher && (
             <button
               onClick={toggleScreenShare}
+              disabled={isScreenShareLoading}
               className={`p-3 rounded-full ${
                 isScreenSharing 
                   ? "bg-purple-600 hover:bg-purple-700" 
                   : "bg-gray-600 hover:bg-gray-700"
-              } transition-all`}
+              } transition-all disabled:opacity-50`}
               title={isScreenSharing ? "Stop Screen Share" : "Start Screen Share"}
+              aria-label={isScreenSharing ? "Stop screen sharing" : "Start screen sharing"}
+              aria-live="polite"
             >
-              {isScreenSharing ? "🖥️●" : "🖥️"}
+              {isScreenShareLoading ? "⏳" : (isScreenSharing ? "🖥️●" : "🖥️")}
             </button>
           )}
 
           {/* Video Controls */}
           <button
             onClick={toggleVideo}
+            disabled={isVideoLoading}
             className={`p-3 rounded-full ${
               isVideoOn 
                 ? "bg-green-600 hover:bg-green-700" 
                 : "bg-red-600 hover:bg-red-700"
-            } transition-all`}
+            } transition-all disabled:opacity-50`}
             title={isVideoOn ? "Turn Off Video" : "Turn On Video"}
+            aria-label={isVideoOn ? "Turn off video camera" : "Turn on video camera"}
+            aria-live="polite"
           >
-            {isVideoOn ? "📹" : "📷"}
+            {isVideoLoading ? "⏳" : (isVideoOn ? "📹" : "📷")}
           </button>
 
           {/* Audio Controls */}
           <button
             onClick={toggleMute}
+            disabled={isMuteLoading}
             className={`p-3 rounded-full ${
               isMuted 
                 ? "bg-red-600 hover:bg-red-700" 
                 : "bg-green-600 hover:bg-green-700"
-            } transition-all`}
+            } transition-all disabled:opacity-50`}
             title={isMuted ? "Unmute" : "Mute"}
+            aria-label={isMuted ? "Unmute microphone" : "Mute microphone"}
+            aria-live="polite"
           >
-            {isMuted ? "🔇" : "🎤"}
+            {isMuteLoading ? "⏳" : (isMuted ? "🔇" : "🎤")}
           </button>
 
           {/* Hand Raise */}
           <button
             onClick={toggleHandRaise}
+            disabled={isHandRaiseLoading}
             className={`p-3 rounded-full ${
               isHandRaised 
                 ? "bg-yellow-600 hover:bg-yellow-700" 
                 : "bg-gray-600 hover:bg-gray-700"
-            } transition-all`}
+            } transition-all disabled:opacity-50`}
             title={isHandRaised ? "Lower Hand" : "Raise Hand"}
+            aria-label={isHandRaised ? "Lower hand" : "Raise hand"}
+            aria-live="polite"
           >
-            {isHandRaised ? "✋" : "🤚"}
+            {isHandRaiseLoading ? "⏳" : (isHandRaised ? "✋" : "🤚")}
           </button>
 
           {/* Permission Status */}
@@ -1071,6 +1125,7 @@ export default function LiveClass() {
           <button
             onClick={leaveClass}
             className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded transition-all"
+            aria-label="Leave live class session"
           >
             Leave Class
           </button>
@@ -1160,13 +1215,15 @@ export default function LiveClass() {
                   </div>
                   <button
                     onClick={toggleRecording}
+                    disabled={isRecordingLoading}
                     className={`px-3 py-1 rounded text-sm ${
                       isRecording 
                         ? "bg-red-600 hover:bg-red-700" 
                         : "bg-green-600 hover:bg-green-700"
-                    }`}
+                    } disabled:opacity-50`}
+                    aria-label={isRecording ? "Stop recording" : "Start recording"}
                   >
-                    {isRecording ? "⏹️ Stop Recording" : "🔴 Start Recording"}
+                    {isRecordingLoading ? "⏳" : (isRecording ? "⏹️ Stop Recording" : "🔴 Start Recording")}
                   </button>
                 </div>
               </div>
@@ -1177,13 +1234,15 @@ export default function LiveClass() {
                   <span className="font-semibold">Screen Sharing: {isScreenSharing ? "ACTIVE" : "INACTIVE"}</span>
                   <button
                     onClick={toggleScreenShare}
+                    disabled={isScreenShareLoading}
                     className={`px-3 py-1 rounded text-sm ${
                       isScreenSharing 
                         ? "bg-red-600 hover:bg-red-700" 
                         : "bg-purple-600 hover:bg-purple-700"
-                    }`}
+                    } disabled:opacity-50`}
+                    aria-label={isScreenSharing ? "Stop screen sharing" : "Start screen sharing"}
                   >
-                    {isScreenSharing ? "Stop Sharing" : "Start Sharing"}
+                    {isScreenShareLoading ? "⏳" : (isScreenSharing ? "Stop Sharing" : "Start Sharing")}
                   </button>
                 </div>
               </div>
@@ -1193,12 +1252,14 @@ export default function LiveClass() {
                 <button
                   onClick={muteAllStudents}
                   className="bg-red-600 hover:bg-red-700 px-3 py-2 rounded text-sm"
+                  aria-label="Mute all students"
                 >
                   Mute All
                 </button>
                 <button
                   onClick={unmuteAllStudents}
                   className="bg-green-600 hover:bg-green-700 px-3 py-2 rounded text-sm"
+                  aria-label="Unmute all students"
                 >
                   Unmute All
                 </button>
@@ -1206,6 +1267,7 @@ export default function LiveClass() {
                 <button
                   onClick={endLiveClass}
                   className="bg-orange-600 hover:bg-orange-700 px-3 py-2 rounded text-sm"
+                  aria-label="End live class for all participants"
                 >
                   🛑 End Live Class
                 </button>
@@ -1222,12 +1284,14 @@ export default function LiveClass() {
                         <button
                           onClick={() => grantSpeakingPermission(request.studentId)}
                           className="bg-green-600 hover:bg-green-700 px-2 py-1 rounded text-xs"
+                          aria-label={`Grant speaking permission to ${request.studentName}`}
                         >
                           Approve
                         </button>
                         <button
                           onClick={() => revokeSpeakingPermission(request.studentId)}
                           className="bg-red-600 hover:bg-red-700 px-2 py-1 rounded text-xs"
+                          aria-label={`Deny speaking permission to ${request.studentName}`}
                         >
                           Deny
                         </button>
@@ -1259,6 +1323,7 @@ export default function LiveClass() {
                           onClick={() => muteStudent(participant.studentId)}
                           className="bg-red-600 hover:bg-red-700 px-2 py-1 rounded text-xs"
                           disabled={participant.isMuted}
+                          aria-label={`Mute ${participant.name}`}
                         >
                           Mute
                         </button>
@@ -1266,6 +1331,7 @@ export default function LiveClass() {
                           onClick={() => unmuteStudent(participant.studentId)}
                           className="bg-green-600 hover:bg-green-700 px-2 py-1 rounded text-xs"
                           disabled={!participant.isMuted}
+                          aria-label={`Unmute ${participant.name}`}
                         >
                           Unmute
                         </button>
@@ -1273,6 +1339,7 @@ export default function LiveClass() {
                           <button
                             onClick={() => grantSpeakingPermission(participant.studentId)}
                             className="bg-blue-600 hover:bg-blue-700 px-2 py-1 rounded text-xs"
+                            aria-label={`Grant microphone permission to ${participant.name}`}
                           >
                             Grant Mic
                           </button>
@@ -1298,6 +1365,10 @@ export default function LiveClass() {
           {/* UPDATED: Chat Messages with Pagination */}
           <div 
             ref={chatContainerRef}
+            role="log"
+            aria-label="Chat messages"
+            aria-live="polite"
+            aria-atomic="false"
             className="flex-1 p-4 overflow-y-auto space-y-3"
           >
             {/* NEW: Load More Button */}
@@ -1307,6 +1378,7 @@ export default function LiveClass() {
                   onClick={loadMoreChat}
                   disabled={isLoadingChat}
                   className="bg-gray-600 hover:bg-gray-700 px-3 py-1 rounded text-sm disabled:opacity-50"
+                  aria-label="Load older chat messages"
                 >
                   {isLoadingChat ? "Loading..." : "Load Older Messages"}
                 </button>
@@ -1338,7 +1410,7 @@ export default function LiveClass() {
             )}
           </div>
 
-          {/* UPDATED: Message Input with sanitization */}
+          {/* UPDATED: Message Input with sanitization and ARIA labels */}
           <div className="p-4 border-t border-gray-700">
             <div className="flex space-x-2">
               <input
@@ -1347,11 +1419,13 @@ export default function LiveClass() {
                 onChange={(e) => setNewMessage(e.target.value)}
                 onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
                 placeholder="Type a message..."
+                aria-label="Type chat message"
                 className="flex-1 bg-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
               <button
                 onClick={sendMessage}
                 className="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm"
+                aria-label="Send chat message"
               >
                 Send
               </button>
@@ -1370,9 +1444,11 @@ export default function LiveClass() {
             </p>
             <button
               onClick={joinClass}
-              className="bg-green-600 hover:bg-green-700 px-6 py-3 rounded-lg text-lg font-semibold transition-all"
+              disabled={isJoinLoading}
+              className="bg-green-600 hover:bg-green-700 px-6 py-3 rounded-lg text-lg font-semibold transition-all disabled:opacity-50"
+              aria-label="Join live class session"
             >
-              Join Class Now
+              {isJoinLoading ? "Joining..." : "Join Class Now"}
             </button>
           </div>
         </div>
