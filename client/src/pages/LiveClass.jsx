@@ -50,6 +50,47 @@ export default function LiveClass() {
   const client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
   const chatContainerRef = useRef(null);
 
+  // NEW: Track management utilities
+  const trackManagement = {
+    publishTrack: async (client, track) => {
+      try {
+        await client.publish(track);
+        console.log(`✅ ${track.getTrackLabel()} published successfully`);
+        return true;
+      } catch (error) {
+        console.error(`❌ Error publishing ${track.getTrackLabel()}:`, error);
+        return false;
+      }
+    },
+    
+    unpublishTrack: async (client, track) => {
+      try {
+        await client.unpublish(track);
+        console.log(`✅ ${track.getTrackLabel()} unpublished successfully`);
+        return true;
+      } catch (error) {
+        console.error(`❌ Error unpublishing ${track.getTrackLabel()}:`, error);
+        return false;
+      }
+    },
+    
+    enableTrack: (track, enabled) => {
+      if (track) {
+        track.setEnabled(enabled);
+        console.log(`✅ ${track.getTrackLabel()} ${enabled ? 'enabled' : 'disabled'}`);
+      }
+    }
+  };
+
+  // NEW: Production mode check and conditional logging
+  const isDevelopment = process.env.NODE_ENV === 'development';
+  
+  const debugLog = (...args) => {
+    if (isDevelopment) {
+      console.log(...args);
+    }
+  };
+
   // NEW: Input sanitization function
   const sanitizeMessage = (text) => {
     return text
@@ -125,16 +166,23 @@ export default function LiveClass() {
     return () => clearInterval(interval);
   }, [lastActivity, showTimeoutWarning, joined]);
 
-  // Monitor network stability
+  // UPDATED: Enhanced network monitoring with reconnection
   useEffect(() => {
     const handleOnline = () => {
-      console.log("🌐 Network back online");
+      console.log("🌐 Network back online - attempting to reconnect...");
+      // Attempt to restore connection
+      if (joined) {
+        setTimeout(() => {
+          fetchActiveSessions();
+        }, 2000);
+      }
     };
     
     const handleOffline = () => {
       console.log("🌐 Network offline - audio/video may be affected");
+      alert("Network connection lost. Trying to reconnect...");
     };
-    
+
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
     
@@ -142,30 +190,41 @@ export default function LiveClass() {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
-  }, []);
+  }, [joined]);
+
+  // Helper function to fetch active sessions
+  const fetchActiveSessions = async () => {
+    try {
+      const response = await API.get(`/live/session/${sessionId}`);
+      if (response.data.session.isActive) {
+        debugLog("✅ Session is still active, connection restored");
+      }
+    } catch (error) {
+      console.error("Error fetching session status:", error);
+    }
+  };
 
   // Debug useEffect to monitor chat state
   useEffect(() => {
-    console.log("💬 Chat messages updated:", chatMessages);
-    console.log("💬 Chat messages length:", chatMessages.length);
+    debugLog("💬 Chat messages updated:", chatMessages.length);
   }, [chatMessages]);
 
   // Add this function to handle audio track updates when permission is granted
   const forceAudioUpdate = async () => {
     try {
       if (localTracks.audio && hasSpeakingPermission) {
-        console.log("🎯 Republishing audio track after permission grant");
+        debugLog("🎯 Republishing audio track after permission grant");
         
-        // Unpublish and republish audio track with new permissions
-        await client.unpublish(localTracks.audio);
+        // Use track management utility
+        await trackManagement.unpublishTrack(client, localTracks.audio);
         
         // Re-enable the audio track
-        localTracks.audio.setEnabled(true);
+        trackManagement.enableTrack(localTracks.audio, true);
         
         // Republish the audio track
-        await client.publish(localTracks.audio);
+        await trackManagement.publishTrack(client, localTracks.audio);
         
-        console.log("✅ Audio track republished successfully after permission grant");
+        debugLog("✅ Audio track republished successfully after permission grant");
       }
     } catch (error) {
       console.error("❌ Error forcing audio update:", error);
@@ -177,9 +236,9 @@ export default function LiveClass() {
     try {
       if (localTracks.video && hasSpeakingPermission) {
         // Republish video track to ensure it's available to others
-        await client.unpublish(localTracks.video);
-        await client.publish(localTracks.video);
-        console.log("✅ Video track republished after permission grant");
+        await trackManagement.unpublishTrack(client, localTracks.video);
+        await trackManagement.publishTrack(client, localTracks.video);
+        debugLog("✅ Video track republished after permission grant");
       }
     } catch (error) {
       console.error("❌ Error forcing video update:", error);
@@ -188,16 +247,10 @@ export default function LiveClass() {
 
   // Debug audio state
   useEffect(() => {
-    console.log("🎧 AUDIO STATE DEBUG:", {
-      isMuted,
-      hasSpeakingPermission,
-      audioTrackExists: !!localTracks.audio,
-      audioTrackEnabled: localTracks.audio?.enabled,
-      audioTrackPublished: localTracks.audio?.isPublished
-    });
-  }, [isMuted, hasSpeakingPermission, localTracks.audio]);
+    debugLog("🎧 Audio state:", { isMuted, hasSpeakingPermission });
+  }, [isMuted, hasSpeakingPermission]);
 
-  // UPDATED: Enhanced toggle mute function with loading state
+  // UPDATED: Enhanced toggle mute function with loading state and track utilities
   const toggleMute = async () => {
     if (!localTracks.audio || isMuteLoading) return;
 
@@ -206,25 +259,23 @@ export default function LiveClass() {
       if (isMuted) {
         // If muted and trying to unmute
         if (!hasSpeakingPermission) {
-          console.log("🔔 No speaking permission - requesting...");
+          debugLog("🔔 No speaking permission - requesting...");
           await requestSpeakingPermission();
-          // ✅ FIX: Don't return - let the polling handle the actual unmute
-          // The permission will be granted and polling will update audio state
         } else {
           // If we have permission, proceed with unmute
-          console.log("🎤 Unmuting with permission...");
+          debugLog("🎤 Unmuting with permission...");
           await API.put(`/live/self-unmute/${sessionId}`);
-          localTracks.audio.setEnabled(true);
+          trackManagement.enableTrack(localTracks.audio, true);
           setIsMuted(false);
-          console.log("✅ Successfully unmuted");
+          debugLog("✅ Successfully unmuted");
         }
       } else {
         // Muting is always allowed
-        console.log("🔇 Muting...");
+        debugLog("🔇 Muting...");
         await API.put(`/live/self-mute/${sessionId}`);
-        localTracks.audio.setEnabled(false);
+        trackManagement.enableTrack(localTracks.audio, false);
         setIsMuted(true);
-        console.log("✅ Successfully muted");
+        debugLog("✅ Successfully muted");
       }
     } catch (err) {
       console.error("❌ Toggle mute failed:", err);
@@ -245,16 +296,16 @@ export default function LiveClass() {
       
       // If it's the current user, force audio update
       if (studentId === localStorage.getItem("userId") && hasPermission && localTracks.audio) {
-        console.log("🎯 Immediate audio update for permission grant");
-        localTracks.audio.setEnabled(true);
+        debugLog("🎯 Immediate audio update for permission grant");
+        trackManagement.enableTrack(localTracks.audio, true);
         setIsMuted(false);
         
         // Republish audio track
         setTimeout(async () => {
           try {
-            await client.unpublish(localTracks.audio);
-            await client.publish(localTracks.audio);
-            console.log("✅ Audio track immediately republished");
+            await trackManagement.unpublishTrack(client, localTracks.audio);
+            await trackManagement.publishTrack(client, localTracks.audio);
+            debugLog("✅ Audio track immediately republished");
           } catch (error) {
             console.error("❌ Immediate audio republish failed:", error);
           }
@@ -265,7 +316,7 @@ export default function LiveClass() {
     }
   };
 
-  // UPDATED: Start Screen Sharing with loading state
+  // UPDATED: Start Screen Sharing with loading state and track utilities
   const startScreenShare = async () => {
     try {
       if (!isTeacher) {
@@ -280,13 +331,13 @@ export default function LiveClass() {
         encoderConfig: "1080p_1",
       }, "auto");
 
-      // Unpublish camera video first
+      // Unpublish camera video first using track utility
       if (localTracks.video) {
-        await client.unpublish(localTracks.video);
+        await trackManagement.unpublishTrack(client, localTracks.video);
       }
 
-      // Publish screen share track
-      await client.publish(screenTrack);
+      // Publish screen share track using track utility
+      await trackManagement.publishTrack(client, screenTrack);
       
       // Play screen share in local player
       if (Array.isArray(screenTrack)) {
@@ -301,7 +352,7 @@ export default function LiveClass() {
       await API.post(`/live/screen-share/start/${sessionId}`);
       setIsScreenSharing(true);
       
-      console.log("Screen sharing started successfully");
+      debugLog("Screen sharing started successfully");
 
     } catch (err) {
       console.error("Start screen share failed:", err);
@@ -309,7 +360,7 @@ export default function LiveClass() {
       // If user cancels screen share picker, republish camera
       if (err.message?.includes('PERMISSION_DENIED') || err.name === 'NotAllowedError') {
         if (localTracks.video) {
-          await client.publish(localTracks.video);
+          await trackManagement.publishTrack(client, localTracks.video);
           localTracks.video.play("local-player");
         }
       } else {
@@ -320,21 +371,21 @@ export default function LiveClass() {
     }
   };
 
-  // UPDATED: Stop Screen Sharing with loading state
+  // UPDATED: Stop Screen Sharing with loading state and track utilities
   const stopScreenShare = async () => {
     try {
       setIsScreenShareLoading(true);
 
       if (screenShareTrack) {
-        // Unpublish screen share track
-        await client.unpublish(screenShareTrack);
+        // Unpublish screen share track using track utility
+        await trackManagement.unpublishTrack(client, screenShareTrack);
         screenShareTrack.close();
         setScreenShareTrack(null);
       }
 
-      // Republish camera video
+      // Republish camera video using track utility
       if (localTracks.video) {
-        await client.publish(localTracks.video);
+        await trackManagement.publishTrack(client, localTracks.video);
         localTracks.video.play("local-player");
       }
 
@@ -342,7 +393,7 @@ export default function LiveClass() {
       await API.post(`/live/screen-share/stop/${sessionId}`);
       setIsScreenSharing(false);
       
-      console.log("Screen sharing stopped");
+      debugLog("Screen sharing stopped");
 
     } catch (err) {
       console.error("Stop screen share failed:", err);
@@ -361,16 +412,14 @@ export default function LiveClass() {
     }
   };
 
-  // UPDATED: Toggle Video On/Off with loading state
+  // UPDATED: Toggle Video On/Off with loading state and track utilities
   const toggleVideo = async () => {
     if (!localTracks.video || isVideoLoading) return;
 
     setIsVideoLoading(true);
     try {
       const newVideoState = !isVideoOn;
-
-      // Just toggle camera locally
-      await localTracks.video.setEnabled(newVideoState);
+      trackManagement.enableTrack(localTracks.video, newVideoState);
       setIsVideoOn(newVideoState);
     } catch (err) {
       console.error("Toggle video failed:", err);
@@ -441,13 +490,13 @@ export default function LiveClass() {
     }
   };
 
-  // ✅ IMPROVED: User published event handler with better stability
+  // ✅ IMPROVED: User published event handler with better stability and cleaned logs
   const handleUserPublished = async (user, mediaType) => {
-    console.log("🔍 User published:", user.uid, "Media type:", mediaType);
+    debugLog("User published:", user.uid, mediaType);
     
     try {
       await client.subscribe(user, mediaType);
-      console.log("✅ Subscribed to user:", user.uid, "for", mediaType);
+      debugLog("Subscribed to user:", user.uid, "for", mediaType);
       
       // Add small delay for DOM stability
       setTimeout(() => {
@@ -455,13 +504,13 @@ export default function LiveClass() {
           const playerElement = document.getElementById(`remote-${user.uid}`);
           if (playerElement) {
             user.videoTrack.play(`remote-${user.uid}`);
-            console.log("🎥 Playing video for user:", user.uid);
+            debugLog("Playing video for user:", user.uid);
           }
         }
         
         if (mediaType === "audio" && user.audioTrack) {
           user.audioTrack.play();
-          console.log("🔊 Playing audio for user:", user.uid);
+          debugLog("Playing audio for user:", user.uid);
         }
       }, 200);
       
@@ -496,14 +545,11 @@ export default function LiveClass() {
     adjustRemoteAudioVolume(50); // Set to 50% volume
   }, [remoteUsers]);
 
-  // UPDATED: Fetch session info and join class with proper microphone permission and improved error handling
+  // UPDATED: Fetch session info and join class with cleaned logs and track utilities
   const joinClass = async () => {
     try {
       setIsJoinLoading(true);
-      console.log("🔄 Attempting to join class...");
-      console.log("📋 Session ID:", sessionId);
-      console.log("👤 User Role:", localStorage.getItem("role"));
-      console.log("🔑 User ID:", localStorage.getItem("userId"));
+      debugLog("Attempting to join class...");
       
       // ✅ SIMPLIFIED AUTH CHECK - Only check token
       const token = localStorage.getItem("token");
@@ -515,16 +561,16 @@ export default function LiveClass() {
         return;
       }
 
-      console.log("✅ Authentication token present");
+      debugLog("Authentication token present");
 
       // ✅ CRITICAL FIX: Request microphone permission BEFORE joining
       try {
-        console.log("🎤 Requesting microphone permission...");
+        debugLog("Requesting microphone permission...");
         const stream = await navigator.mediaDevices.getUserMedia({ 
           audio: true, 
           video: true 
         });
-        console.log("✅ Microphone and camera access granted");
+        debugLog("Microphone and camera access granted");
         // Stop the tracks immediately since we'll create proper ones with Agora
         stream.getTracks().forEach(track => track.stop());
       } catch (err) {
@@ -535,7 +581,7 @@ export default function LiveClass() {
 
       // Join the live session via backend
       const joinResponse = await API.post(`/live/join/${sessionId}`);
-      console.log("✅ Join response:", joinResponse.data);
+      debugLog("Join response received");
       
       const { session, token: agoraToken, participantInfo } = joinResponse.data;
       
@@ -549,20 +595,18 @@ export default function LiveClass() {
       const isUserTeacher = participantInfo.role === "host" || userRole === "teacher" || userRole === "admin";
       setIsTeacher(isUserTeacher);
       
-      console.log("🎯 User is teacher/host:", isUserTeacher);
-      console.log("🎯 Participant role:", participantInfo.role);
-      console.log("🎯 User role from localStorage:", userRole);
+      debugLog("User role:", { isTeacher: isUserTeacher, participantRole: participantInfo.role });
 
       // Check if teacher is rejoining
       if (isUserTeacher && participantInfo.role === "host") {
-        console.log("Teacher/Admin rejoining live session");
+        debugLog("Teacher/Admin rejoining live session");
       }
 
       // Join Agora channel
       const uid = await client.join(appId, session.channelName, agoraToken, null);
 
       // Create local tracks with audio optimization
-      console.log("🎤 Creating microphone and camera tracks...");
+      debugLog("Creating microphone and camera tracks...");
       const [audioTrack, videoTrack] = await AgoraRTC.createMicrophoneAndCameraTracks(
         {
           // Audio optimization to reduce echo
@@ -578,31 +622,14 @@ export default function LiveClass() {
         {}
       );
       
-      console.log("✅ Tracks created:", {
-        audioEnabled: audioTrack.enabled,
-        videoEnabled: videoTrack.enabled,
-        audioPublished: audioTrack.isPublished,
-        videoPublished: videoTrack.isPublished
-      });
+      debugLog("Tracks created");
 
       // ✅ FIX: Always enable audio track initially, control via publishing
-      audioTrack.setEnabled(true); // Always enable the track
-      console.log("🔊 Audio track created and enabled");
+      trackManagement.enableTrack(audioTrack, true);
+      debugLog("Audio track created and enabled");
 
       // Store mute state but don't disable track - control via Agora publishing
       setIsMuted(participantInfo.isMuted);
-
-      // Debug audio state
-      console.log("🎧 AUDIO TRACK DEBUG:", {
-        enabled: audioTrack.enabled,
-        isPublished: audioTrack.isPublished,
-        mediaStreamTrack: audioTrack.getMediaStreamTrack(),
-        readyState: audioTrack.getMediaStreamTrack().readyState
-      });
-
-      // Test if we can actually access microphone
-      const stream = audioTrack.getMediaStreamTrack();
-      console.log("🎤 Microphone access:", stream ? "GRANTED" : "DENIED");
 
       setLocalTracks({ audio: audioTrack, video: videoTrack });
       videoTrack.play("local-player");
@@ -611,7 +638,7 @@ export default function LiveClass() {
       client.on("user-published", handleUserPublished);
 
       client.on("user-unpublished", (user, mediaType) => {
-        console.log("🔍 User unpublished:", user.uid, "Media type:", mediaType);
+        debugLog("User unpublished:", user.uid, mediaType);
         
         if (mediaType === "video" && user.videoTrack) {
           user.videoTrack.stop();
@@ -626,18 +653,19 @@ export default function LiveClass() {
 
       // Add user-joined event to handle new participants
       client.on("user-joined", (user) => {
-        console.log("🎉 User joined:", user.uid);
+        debugLog("User joined:", user.uid);
       });
 
       client.on("user-left", (user) => {
-        console.log("👋 User left:", user.uid);
+        debugLog("User left:", user.uid);
         setRemoteUsers((prev) => prev.filter((u) => u.uid !== user.uid));
       });
 
-      // Publish tracks
-      console.log("📡 Publishing audio and video tracks...");
-      await client.publish([audioTrack, videoTrack]);
-      console.log("✅ Tracks published successfully");
+      // Publish tracks using track utilities
+      debugLog("Publishing audio and video tracks...");
+      await trackManagement.publishTrack(client, audioTrack);
+      await trackManagement.publishTrack(client, videoTrack);
+      debugLog("Tracks published successfully");
       
       setJoined(true);
 
@@ -646,8 +674,6 @@ export default function LiveClass() {
 
     } catch (err) {
       console.error("❌ Join failed:", err);
-      console.error("❌ Error response:", err.response?.data);
-      console.error("❌ Error status:", err.response?.status);
       
       let errorMessage = "Failed to join class. Please try again.";
       
@@ -670,9 +696,9 @@ export default function LiveClass() {
     }
   };
 
-  // ✅ IMPROVED: Poll for session updates with better stability
+  // ✅ IMPROVED: Poll for session updates with better stability and cleaned logs
   const startSessionPolling = () => {
-    console.log("🔄 Starting STABLE session polling...");
+    debugLog("Starting session polling...");
     
     let isPolling = false; // Prevent overlapping requests
     
@@ -684,11 +710,10 @@ export default function LiveClass() {
       isPolling = true;
       
       try {
-        console.log("📡 Polling session data for:", sessionId);
         const response = await API.get(`/live/session/${sessionId}`);
         
         if (!response.data) {
-          console.log("❌ No data in polling response");
+          debugLog("No data in polling response");
           isPolling = false;
           return;
         }
@@ -703,7 +728,7 @@ export default function LiveClass() {
 
         // Only update if session is active
         if (isActive === false) {
-          console.log("⏹️ Session has ended - stopping updates");
+          debugLog("Session has ended - stopping updates");
           clearInterval(interval);
           isPolling = false;
           return;
@@ -718,7 +743,7 @@ export default function LiveClass() {
         if (chatMessages && Array.isArray(chatMessages)) {
           setChatMessages(prev => {
             if (prev.length !== chatMessages.length) {
-              console.log("💬 Chat messages updated:", chatMessages.length);
+              debugLog("Chat messages updated:", chatMessages.length);
               return chatMessages;
             }
             return prev;
@@ -740,8 +765,8 @@ export default function LiveClass() {
             if (currentParticipant.isMuted !== isMuted) {
               setIsMuted(currentParticipant.isMuted);
               if (localTracks.audio) {
-                localTracks.audio.setEnabled(!currentParticipant.isMuted);
-                console.log(`🔊 Audio ${currentParticipant.isMuted ? 'muted' : 'unmuted'} via polling`);
+                trackManagement.enableTrack(localTracks.audio, !currentParticipant.isMuted);
+                debugLog(`Audio ${currentParticipant.isMuted ? 'muted' : 'unmuted'} via polling`);
               }
             }
             
@@ -751,7 +776,7 @@ export default function LiveClass() {
               
               // Only update audio if permission actually changed
               if (currentParticipant.hasSpeakingPermission && localTracks.audio) {
-                localTracks.audio.setEnabled(true);
+                trackManagement.enableTrack(localTracks.audio, true);
               }
             }
             
@@ -770,7 +795,7 @@ export default function LiveClass() {
     }, 3000);
 
     return () => {
-      console.log("🛑 Clearing polling interval");
+      debugLog("Clearing polling interval");
       clearInterval(interval);
     };
   };
@@ -818,10 +843,10 @@ export default function LiveClass() {
   // FIXED: Teacher controls with enhanced permission checking
   const grantSpeakingPermission = async (studentId) => {
     try {
-      console.log("🎯 Granting permission to:", studentId);
+      debugLog("Granting permission to:", studentId);
       
       const response = await API.put(`/live/grant-speaking/${sessionId}/${studentId}`);
-      console.log("✅ Permission granted response:", response.data);
+      debugLog("Permission granted response received");
       
       // Update UI immediately
       setPendingRequests(prev => prev.filter(req => req.studentId !== studentId));
@@ -845,14 +870,11 @@ export default function LiveClass() {
 
   const muteStudent = async (studentId) => {
     try {
-      console.log("🔇 Muting student:", studentId);
-      console.log("🔇 Current user is teacher:", isTeacher);
-      
+      debugLog("Muting student:", studentId);
       const response = await API.put(`/live/mute/${sessionId}/${studentId}`, { mute: true });
-      console.log("✅ Student muted:", response.data);
+      debugLog("Student muted");
     } catch (err) {
       console.error("❌ Mute student failed:", err);
-      console.error("Error response:", err.response?.data);
       alert(err.response?.data?.message || "Failed to mute student");
     }
   };
@@ -860,14 +882,12 @@ export default function LiveClass() {
   // FIXED: Enhanced unmute student function
   const unmuteStudent = async (studentId) => {
     try {
-      console.log("🔊 Unmuting student:", studentId);
-      console.log("👨‍🏫 Current user is teacher:", isTeacher);
-      
+      debugLog("Unmuting student:", studentId);
       const response = await API.put(`/live/mute/${sessionId}/${studentId}`, { 
         mute: false 
       });
       
-      console.log("✅ Student unmuted via API:", response.data);
+      debugLog("Student unmuted via API");
       
       // Force immediate UI update by refreshing participant data
       const sessionResponse = await API.get(`/live/session/${sessionId}`);
@@ -877,7 +897,6 @@ export default function LiveClass() {
       
     } catch (err) {
       console.error("❌ Unmute student failed:", err);
-      console.error("Error details:", err.response?.data);
       alert(err.response?.data?.message || "Failed to unmute student");
     }
   };
@@ -885,9 +904,9 @@ export default function LiveClass() {
   // FIXED: Mute All Students function
   const muteAllStudents = async () => {
     try {
-      console.log("🔇 Muting all students...");
+      debugLog("Muting all students...");
       const response = await API.put(`/live/mute-all/${sessionId}`);
-      console.log("✅ All students muted:", response.data);
+      debugLog("All students muted");
       
       // Force immediate UI update
       const sessionResponse = await API.get(`/live/session/${sessionId}`);
@@ -903,9 +922,9 @@ export default function LiveClass() {
   // FIXED: Unmute All Students function
   const unmuteAllStudents = async () => {
     try {
-      console.log("🔊 Unmuting all students...");
+      debugLog("Unmuting all students...");
       const response = await API.put(`/live/unmute-all/${sessionId}`);
-      console.log("✅ All students unmuted:", response.data);
+      debugLog("All students unmuted");
       
       // Force immediate UI update
       const sessionResponse = await API.get(`/live/session/${sessionId}`);
@@ -923,12 +942,9 @@ export default function LiveClass() {
     if (!window.confirm("Are you sure you want to end this live class for everyone?")) return;
 
     try {
-      console.log("🛑 Attempting to end class...");
-      console.log("🛑 Current user is teacher:", isTeacher);
-      console.log("🛑 Session ID:", sessionId);
-      
+      debugLog("Attempting to end class...");
       const response = await API.put(`/live/end/${sessionId}`);
-      console.log("✅ Class ended successfully:", response.data);
+      debugLog("Class ended successfully");
       
       alert("Live class ended successfully.");
       
@@ -943,7 +959,6 @@ export default function LiveClass() {
       }
     } catch (err) {
       console.error("❌ End live class failed:", err);
-      console.error("Error response:", err.response?.data);
       alert(err.response?.data?.message || "Failed to end class. Please check if you're the teacher of this session.");
     }
   };
@@ -1180,22 +1195,22 @@ export default function LiveClass() {
           </div>
 
           {/* Temporary Debug Panel - Remove after testing */}
-          <div className="mt-4 p-3 bg-gray-800 rounded-lg">
-            <h4 className="font-semibold text-yellow-400 mb-2">🔧 Debug Info</h4>
-            <div className="text-xs space-y-1">
-              <div>Session ID: {sessionId}</div>
-              <div>User ID: {localStorage.getItem("userId")}</div>
-              <div>User Role: {localStorage.getItem("role")}</div>
-              <div>Is Teacher: {isTeacher ? "✅ YES" : "❌ NO"}</div>
-              <div>Chat Messages: {chatMessages.length}</div>
-              <div>Session Active: {sessionInfo?.isActive ? "✅ YES" : "❌ NO"}</div>
-              <div>Joined: {joined ? "✅ YES" : "❌ NO"}</div>
-              <div>Remote Users: {remoteUsers.length}</div>
-              <div>Has Speaking Permission: {hasSpeakingPermission ? "✅ YES" : "❌ NO"}</div>
-              <div>Audio Track Enabled: {localTracks.audio?.enabled ? "✅ YES" : "❌ NO"}</div>
-              <div>Audio Track Published: {localTracks.audio?.isPublished ? "✅ YES" : "❌ NO"}</div>
+          {isDevelopment && (
+            <div className="mt-4 p-3 bg-gray-800 rounded-lg">
+              <h4 className="font-semibold text-yellow-400 mb-2">🔧 Debug Info</h4>
+              <div className="text-xs space-y-1">
+                <div>Session ID: {sessionId}</div>
+                <div>User ID: {localStorage.getItem("userId")}</div>
+                <div>User Role: {localStorage.getItem("role")}</div>
+                <div>Is Teacher: {isTeacher ? "✅ YES" : "❌ NO"}</div>
+                <div>Chat Messages: {chatMessages.length}</div>
+                <div>Session Active: {sessionInfo?.isActive ? "✅ YES" : "❌ NO"}</div>
+                <div>Joined: {joined ? "✅ YES" : "❌ NO"}</div>
+                <div>Remote Users: {remoteUsers.length}</div>
+                <div>Has Speaking Permission: {hasSpeakingPermission ? "✅ YES" : "❌ NO"}</div>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Teacher Controls */}
           {isTeacher && (
