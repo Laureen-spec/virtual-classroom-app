@@ -99,19 +99,16 @@ export default function LiveClass() {
         if (!hasSpeakingPermission) {
           console.log("🔔 No speaking permission - requesting...");
           await requestSpeakingPermission();
-          
-          // Don't return here - wait for permission and then unmute
-          // The polling will handle the actual unmute when permission is granted
-          return;
+          // ✅ FIX: Don't return - let the polling handle the actual unmute
+          // The permission will be granted and polling will update audio state
+        } else {
+          // If we have permission, proceed with unmute
+          console.log("🎤 Unmuting with permission...");
+          await API.put(`/live/self-unmute/${sessionId}`);
+          localTracks.audio.setEnabled(true);
+          setIsMuted(false);
+          console.log("✅ Successfully unmuted");
         }
-        
-        // If we have permission, proceed with unmute
-        console.log("🎤 Unmuting with permission...");
-        await API.put(`/live/self-unmute/${sessionId}`);
-        localTracks.audio.setEnabled(true);
-        setIsMuted(false);
-        console.log("✅ Successfully unmuted");
-        
       } else {
         // Muting is always allowed
         console.log("🔇 Muting...");
@@ -391,14 +388,24 @@ export default function LiveClass() {
         videoPublished: videoTrack.isPublished
       });
 
-      // Apply initial mute state
-      if (participantInfo.isMuted) {
-        audioTrack.setEnabled(false);
-        console.log("🔇 Audio track initially muted");
-      } else {
-        audioTrack.setEnabled(true);
-        console.log("🔊 Audio track initially enabled");
-      }
+      // ✅ FIX: Always enable audio track initially, control via publishing
+      audioTrack.setEnabled(true); // Always enable the track
+      console.log("🔊 Audio track created and enabled");
+
+      // Store mute state but don't disable track - control via Agora publishing
+      setIsMuted(participantInfo.isMuted);
+
+      // Debug audio state
+      console.log("🎧 AUDIO TRACK DEBUG:", {
+        enabled: audioTrack.enabled,
+        isPublished: audioTrack.isPublished,
+        mediaStreamTrack: audioTrack.getMediaStreamTrack(),
+        readyState: audioTrack.getMediaStreamTrack().readyState
+      });
+
+      // Test if we can actually access microphone
+      const stream = audioTrack.getMediaStreamTrack();
+      console.log("🎤 Microphone access:", stream ? "GRANTED" : "DENIED");
 
       setLocalTracks({ audio: audioTrack, video: videoTrack });
       videoTrack.play("local-player");
