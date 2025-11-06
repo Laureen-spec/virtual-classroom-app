@@ -354,7 +354,7 @@ export default function LiveClass() {
     }
   };
 
-  // Mute student with immediate effect
+  // FIXED: Mute student with proper Agora track management
   const muteStudent = async (studentId) => {
     try {
       debugLog("Muting student:", studentId);
@@ -375,17 +375,20 @@ export default function LiveClass() {
       if (String(studentId) === currentUserId) {
         setIsMuted(true);
         if (localTracks.audio) {
+          // FIX: Unpublish the audio track to stop transmission
+          await trackManagement.unpublishTrack(client, localTracks.audio);
           trackManagement.enableTrack(localTracks.audio, false);
+          debugLog("✅ Audio track unpublished and disabled for muted student");
         }
       }
 
-      debugLog("Student muted");
+      debugLog("Student muted - audio track unpublished");
     } catch (err) {
       console.error("❌ Mute student failed:", err);
     }
   };
 
-  // Unmute student with immediate effect
+  // FIXED: Unmute student with proper Agora track management
   const unmuteStudent = async (studentId) => {
     try {
       debugLog("Unmuting student:", studentId);
@@ -406,18 +409,14 @@ export default function LiveClass() {
       if (String(studentId) === currentUserId) {
         setIsMuted(false);
         if (localTracks.audio) {
+          // FIX: Enable track first, then republish
           trackManagement.enableTrack(localTracks.audio, true);
-          try {
-            await trackManagement.unpublishTrack(client, localTracks.audio);
-            await trackManagement.publishTrack(client, localTracks.audio);
-            debugLog("✅ Local user audio republished after teacher unmute");
-          } catch (err) {
-            console.error("Error republishing after teacher unmute:", err);
-          }
+          await trackManagement.publishTrack(client, localTracks.audio);
+          debugLog("✅ Audio track enabled and republished for unmuted student");
         }
       }
 
-      debugLog("Student unmuted via API");
+      debugLog("Student unmuted - audio track republished");
     } catch (err) {
       console.error("❌ Unmute student failed:", err);
     }
