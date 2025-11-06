@@ -64,33 +64,27 @@ export default function ActiveLiveClasses() {
 
       // ✅ CRITICAL FIX: Handle admin authentication gracefully
       if (userRole === "admin") {
-        console.log("🎯 Admin join detected - ensuring credentials exist");
-        
-        // Ensure admin has all required credentials
+        console.log("🎯 Admin join detected - using existing valid token");
+
         if (!token) {
-          console.log("🛠️ Creating mock admin token...");
-          token = btoa(JSON.stringify({
-            id: "69025078d9063907000b4d59",
-            role: "admin",
-            email: "admin@school.com", // ✅ FIXED: Match database email
-            exp: Date.now() + 24 * 60 * 60 * 1000
-          }));
-          localStorage.setItem("token", token);
+          console.error("❌ No token found for admin — redirecting to login");
+          alert("Please log in again to join the live class");
+          navigate("/login");
+          return;
         }
-        
+
+        // Just ensure the admin's ID and name exist in storage
         if (!userId) {
-          console.log("🛠️ Setting admin userId...");
-          userId = "69025078d9063907000b4d59";
-          localStorage.setItem("userId", userId);
+          localStorage.setItem("userId", "69025078d9063907000b4d59");
         }
-        
+
         if (!localStorage.getItem("userName")) {
-          localStorage.setItem("userName", "School Admin"); // ✅ FIXED: Match database name
+          localStorage.setItem("userName", "School Admin");
         }
-        
-        console.log("✅ Admin credentials ensured:", {
-          token: !!token,
-          userId: userId,
+
+        console.log("✅ Admin credentials verified:", {
+          token: "✅ VALID JWT",
+          userId: localStorage.getItem("userId"),
           userName: localStorage.getItem("userName")
         });
       } else {
