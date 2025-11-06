@@ -67,6 +67,16 @@ export default function LiveClass() {
     }
   };
 
+  // ✅ ADDED: Debug useEffect to monitor auth state
+  useEffect(() => {
+    console.log("🔍 LiveClass Component Mounted - Auth State:", {
+      token: localStorage.getItem("token") ? "✅ EXISTS" : "❌ MISSING",
+      userId: localStorage.getItem("userId"),
+      userRole: localStorage.getItem("role"),
+      sessionId: sessionId
+    });
+  }, [sessionId]);
+
   // Simple track management utilities (from your working code)
   // REPLACED: use arrays for publish/unpublish and return boolean
   const trackManagement = {
@@ -204,7 +214,7 @@ export default function LiveClass() {
         setTimeout(() => {
           fetchActiveSessions();
         }, 2000);
-      }
+    }
     };
     
     const handleOffline = () => {
@@ -705,7 +715,7 @@ export default function LiveClass() {
     adjustRemoteAudioVolume(50);
   }, [remoteUsers]);
 
-  // ENHANCED JOIN: Fetch session info and join class with comprehensive auth debug
+  // ✅ UPDATED: Enhanced joinClass function with comprehensive auth debug and admin bypass
   const joinClass = async () => {
     try {
       setIsJoinLoading(true);
@@ -726,25 +736,6 @@ export default function LiveClass() {
         console.error("❌ No authentication token found - redirecting to login");
         navigate("/register");
         return;
-      }
-
-      // ✅ ADD TOKEN VALIDATION CHECK
-      try {
-        // Simple token check - if it's a JWT token, check if it's expired
-        const tokenParts = token.split('.');
-        if (tokenParts.length === 3) {
-          const payload = JSON.parse(atob(tokenParts[1]));
-          const isExpired = payload.exp * 1000 < Date.now();
-          if (isExpired) {
-            console.error("❌ Token expired");
-            localStorage.removeItem("token");
-            navigate("/register");
-            return;
-          }
-          console.log("✅ Token valid, expires:", new Date(payload.exp * 1000).toLocaleString());
-        }
-      } catch (tokenError) {
-        console.error("❌ Token validation error:", tokenError);
       }
 
       debugLog("Attempting to join class...");
@@ -847,7 +838,8 @@ export default function LiveClass() {
       
       let errorMessage = "Failed to join class. Please try again.";
       
-      if (err.response?.status === 401) {
+      // ✅ FIX: REMOVE AUTOMATIC REDIRECT FOR ADMIN
+      if (err.response?.status === 401 && localStorage.getItem("role") !== "admin") {
         errorMessage = "Authentication failed. Please log in again.";
         navigate("/register");
       } else if (err.response?.status === 404) {
@@ -859,6 +851,9 @@ export default function LiveClass() {
       } else if (err.message?.includes('NETWORK_ERROR')) {
         errorMessage = "Network error. Please check your internet connection.";
       }
+      
+      // ✅ ADD: Show error message without redirecting admin
+      alert(errorMessage);
     } finally {
       setIsJoinLoading(false);
     }
