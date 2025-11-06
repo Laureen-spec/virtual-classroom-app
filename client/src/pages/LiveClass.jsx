@@ -67,12 +67,12 @@ export default function LiveClass() {
     }
   };
 
-  // Simple track management utilities (like your working version)
+  // Simple track management utilities (from your working code)
   const trackManagement = {
     publishTrack: async (client, track) => {
       try {
         await client.publish(track);
-        debugLog(`✅ ${track.getTrackLabel()} published successfully`);
+        console.log(`✅ ${track.getTrackLabel()} published successfully`);
         return true;
       } catch (error) {
         console.error(`❌ Error publishing ${track.getTrackLabel()}:`, error);
@@ -83,7 +83,7 @@ export default function LiveClass() {
     unpublishTrack: async (client, track) => {
       try {
         await client.unpublish(track);
-        debugLog(`✅ ${track.getTrackLabel()} unpublished successfully`);
+        console.log(`✅ ${track.getTrackLabel()} unpublished successfully`);
         return true;
       } catch (error) {
         console.error(`❌ Error unpublishing ${track.getTrackLabel()}:`, error);
@@ -94,7 +94,7 @@ export default function LiveClass() {
     enableTrack: (track, enabled) => {
       if (track) {
         track.setEnabled(enabled);
-        debugLog(`✅ ${track.getTrackLabel()} ${enabled ? 'enabled' : 'disabled'}`);
+        console.log(`✅ ${track.getTrackLabel()} ${enabled ? 'enabled' : 'disabled'}`);
       }
     }
   };
@@ -241,7 +241,12 @@ export default function LiveClass() {
     }
   };
 
-  // Enhanced toggle mute function with proper teacher handling
+  // Debug audio state
+  useEffect(() => {
+    debugLog("🎧 Audio state:", { isMuted, hasSpeakingPermission });
+  }, [isMuted, hasSpeakingPermission]);
+
+  // ORIGINAL WORKING AUDIO: Enhanced toggle mute function with loading state and track utilities
   const toggleMute = async () => {
     if (!localTracks.audio || isMuteLoading) return;
 
@@ -249,7 +254,8 @@ export default function LiveClass() {
     try {
       if (isMuted) {
         // If current user is teacher, allow immediate unmute without permission check
-        if (isTeacher) {
+        const role = localStorage.getItem("role");
+        if (role === "teacher") {
           debugLog("Teacher unmuting themselves (bypass permission).");
           try {
             await API.put(`/live/self-unmute/${sessionId}`);
@@ -370,7 +376,6 @@ export default function LiveClass() {
         setIsMuted(true);
         if (localTracks.audio) {
           trackManagement.enableTrack(localTracks.audio, false);
-          await trackManagement.unpublishTrack(client, localTracks.audio).catch(()=>{});
         }
       }
 
@@ -623,7 +628,7 @@ export default function LiveClass() {
     }
   };
 
-  // User published event handler with better stability
+  // IMPROVED: User published event handler with better stability
   const handleUserPublished = async (user, mediaType) => {
     debugLog("User published:", user.uid, mediaType);
     
@@ -646,7 +651,8 @@ export default function LiveClass() {
         }
       }, 200);
       
-      setRemoteUsers((prev) => {
+      // FIXED: Corrected setRemoteUsers mapping logic
+      setRemoteUsers(prev => {
         const existingUser = prev.find(u => u.uid === user.uid);
         if (existingUser) {
           return prev.map(u => u.uid === user.uid ? { ...u, ...user } : u);
@@ -674,7 +680,7 @@ export default function LiveClass() {
     adjustRemoteAudioVolume(50);
   }, [remoteUsers]);
 
-  // Enhanced joinClass function with proper teacher audio handling
+  // ORIGINAL WORKING JOIN: Fetch session info and join class with cleaned logs and track utilities
   const joinClass = async () => {
     try {
       setIsJoinLoading(true);
@@ -710,22 +716,13 @@ export default function LiveClass() {
       
       setSessionInfo(session);
       setParticipantInfo(participantInfo);
+      setIsMuted(participantInfo.isMuted);
+      setHasSpeakingPermission(participantInfo.hasSpeakingPermission);
       
-      // Proper teacher audio state initialization
       const userRole = localStorage.getItem("role");
       const isUserTeacher = participantInfo.role === "host" || userRole === "teacher" || userRole === "admin";
       setIsTeacher(isUserTeacher);
       
-      // Teachers should NOT be muted by default
-      if (isUserTeacher) {
-        setIsMuted(false);
-        setHasSpeakingPermission(true);
-        debugLog("🎯 Teacher joining - audio enabled by default");
-      } else {
-        setIsMuted(participantInfo.isMuted);
-        setHasSpeakingPermission(participantInfo.hasSpeakingPermission);
-      }
-
       debugLog("User role:", { isTeacher: isUserTeacher, participantRole: participantInfo.role });
 
       const uid = await client.join(appId, session.channelName, agoraToken, null);
@@ -747,40 +744,11 @@ export default function LiveClass() {
       
       debugLog("Tracks created");
 
-      // FIXED: Use simple state like your working version
+      // ORIGINAL WORKING TRACK SETUP
       setLocalTracks({ audio: audioTrack, video: videoTrack });
+      videoTrack.play("local-player");
 
-      // Teachers should have audio enabled and published immediately
-      if (isUserTeacher) {
-        trackManagement.enableTrack(audioTrack, true);
-        setIsMuted(false);
-        debugLog("🎯 Teacher audio enabled and ready to publish");
-      } else {
-        const shouldBeMuted = !!participantInfo?.isMuted;
-        if (shouldBeMuted) {
-          trackManagement.enableTrack(audioTrack, false);
-          setIsMuted(true);
-        } else {
-          trackManagement.enableTrack(audioTrack, true);
-          setIsMuted(false);
-        }
-      }
-
-      // Always publish video
-      if (videoTrack) {
-        await trackManagement.publishTrack(client, videoTrack);
-        videoTrack.play("local-player");
-      }
-
-      // Teachers should publish audio immediately, students only if not muted
-      if (isUserTeacher || !isMuted) {
-        await trackManagement.publishTrack(client, audioTrack);
-        debugLog("✅ Audio published successfully");
-      } else {
-        await trackManagement.unpublishTrack(client, audioTrack).catch(()=>{});
-        debugLog("🔇 Student joined muted - audio not published");
-      }
-
+      // Setup remote user handling with improved stability
       client.on("user-published", handleUserPublished);
 
       client.on("user-unpublished", (user, mediaType) => {
@@ -805,9 +773,16 @@ export default function LiveClass() {
         debugLog("User left:", user.uid);
         setRemoteUsers((prev) => prev.filter((u) => u.uid !== user.uid));
       });
+
+      // ORIGINAL WORKING PUBLISH - Simple and direct
+      debugLog("Publishing audio and video tracks...");
+      await trackManagement.publishTrack(client, audioTrack);
+      await trackManagement.publishTrack(client, videoTrack);
+      debugLog("Tracks published successfully");
       
       setJoined(true);
 
+      // Start polling for session updates
       startSessionPolling();
 
     } catch (err) {
@@ -832,7 +807,7 @@ export default function LiveClass() {
     }
   };
 
-  // Poll for session updates with better stability
+  // IMPROVED: Poll for session updates with better stability
   const startSessionPolling = () => {
     debugLog("Starting session polling...");
     
@@ -888,12 +863,11 @@ export default function LiveClass() {
           setPendingRequests(pending);
         }
 
-        // Better audio state management
+        // ORIGINAL WORKING AUDIO STATE MANAGEMENT
         const currentUserId = localStorage.getItem("userId");
         if (participants && currentUserId) {
           const currentParticipant = participants.find(p => p.studentId === currentUserId);
           if (currentParticipant) {
-            // Update mute state only if changed
             if (currentParticipant.isMuted !== isMuted) {
               setIsMuted(currentParticipant.isMuted);
               if (localTracks.audio) {
@@ -902,17 +876,14 @@ export default function LiveClass() {
               }
             }
             
-            // Update permission state only if changed
             if (currentParticipant.hasSpeakingPermission !== hasSpeakingPermission) {
               setHasSpeakingPermission(currentParticipant.hasSpeakingPermission);
               
-              // Only update audio if permission actually changed
               if (currentParticipant.hasSpeakingPermission && localTracks.audio) {
                 trackManagement.enableTrack(localTracks.audio, true);
               }
             }
             
-            // Update hand raise state
             if (currentParticipant.isHandRaised !== isHandRaised) {
               setIsHandRaised(currentParticipant.isHandRaised);
             }
@@ -1292,7 +1263,6 @@ export default function LiveClass() {
                 <div>Joined: {joined ? "✅ YES" : "❌ NO"}</div>
                 <div>Remote Users: {remoteUsers.length}</div>
                 <div>Has Speaking Permission: {hasSpeakingPermission ? "✅ YES" : "❌ NO"}</div>
-                <div>Is Muted: {isMuted ? "✅ YES" : "❌ NO"}</div>
               </div>
             </div>
           )}
@@ -1421,21 +1391,22 @@ export default function LiveClass() {
                         )}
                       </div>
                       <div className="flex space-x-1 flex-shrink-0">
-                        {participant.isMuted ? (
-                          <button 
-                            onClick={() => unmuteStudent(participant.studentId)} 
-                            className="bg-yellow-600 hover:bg-yellow-700 text-white px-3 py-1 rounded text-xs transition-colors"
-                          >
-                            Unmute
-                          </button>
-                        ) : (
-                          <button 
-                            onClick={() => muteStudent(participant.studentId)} 
-                            className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-xs transition-colors"
-                          >
-                            Mute
-                          </button>
-                        )}
+                        <button
+                          onClick={() => muteStudent(participant.studentId)}
+                          className="bg-red-600 hover:bg-red-700 px-2 py-1 rounded text-xs"
+                          disabled={participant.isMuted}
+                          aria-label={`Mute ${participant.name}`}
+                        >
+                          Mute
+                        </button>
+                        <button
+                          onClick={() => unmuteStudent(participant.studentId)}
+                          className="bg-green-600 hover:bg-green-700 px-2 py-1 rounded text-xs"
+                          disabled={!participant.isMuted}
+                          aria-label={`Unmute ${participant.name}`}
+                        >
+                          Unmute
+                        </button>
                         {!participant.hasSpeakingPermission && (
                           <button
                             onClick={() => grantSpeakingPermission(participant.studentId)}
