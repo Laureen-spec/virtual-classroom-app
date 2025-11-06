@@ -51,6 +51,12 @@ export default function ActiveLiveClasses() {
 
   const joinSession = async (sessionId) => {
     try {
+      // 🚨 IMMEDIATE FIX: Hardcode admin ID
+      if (localStorage.getItem("role") === "admin" && !localStorage.getItem("userId")) {
+        localStorage.setItem("userId", "69025078d9063907000b4d59");
+        console.log("🔧 Admin userId hardcoded");
+      }
+      
       // ✅ ENHANCED AUTH CHECK - Handle missing user ID
       const token = localStorage.getItem("token");
       let userId = localStorage.getItem("userId");
