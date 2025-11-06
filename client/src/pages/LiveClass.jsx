@@ -705,33 +705,66 @@ export default function LiveClass() {
     adjustRemoteAudioVolume(50);
   }, [remoteUsers]);
 
-  // ORIGINAL WORKING JOIN: Fetch session info and join class with cleaned logs and track utilities
+  // ENHANCED JOIN: Fetch session info and join class with comprehensive auth debug
   const joinClass = async () => {
     try {
       setIsJoinLoading(true);
-      debugLog("Attempting to join class...");
       
+      // ✅ ADD COMPREHENSIVE AUTH DEBUG
       const token = localStorage.getItem("token");
+      const userId = localStorage.getItem("userId");
+      const userRole = localStorage.getItem("role");
       
+      console.log("🔄 ADMIN JOIN DEBUG:", {
+        token: token ? "✅ EXISTS" : "❌ MISSING",
+        userId: userId || "❌ MISSING",
+        userRole: userRole || "❌ MISSING",
+        sessionId: sessionId
+      });
+
       if (!token) {
-        console.error("❌ No authentication token found");
+        console.error("❌ No authentication token found - redirecting to login");
         navigate("/register");
         return;
       }
 
-      debugLog("Authentication token present");
-
+      // ✅ ADD TOKEN VALIDATION CHECK
       try {
-        debugLog("Requesting microphone permission...");
-        const stream = await navigator.mediaDevices.getUserMedia({ 
-          audio: true, 
-          video: true 
-        });
-        debugLog("Microphone and camera access granted");
-        stream.getTracks().forEach(track => track.stop());
-      } catch (err) {
-        console.error("❌ Microphone/camera permission denied:", err);
-        return;
+        // Simple token check - if it's a JWT token, check if it's expired
+        const tokenParts = token.split('.');
+        if (tokenParts.length === 3) {
+          const payload = JSON.parse(atob(tokenParts[1]));
+          const isExpired = payload.exp * 1000 < Date.now();
+          if (isExpired) {
+            console.error("❌ Token expired");
+            localStorage.removeItem("token");
+            navigate("/register");
+            return;
+          }
+          console.log("✅ Token valid, expires:", new Date(payload.exp * 1000).toLocaleString());
+        }
+      } catch (tokenError) {
+        console.error("❌ Token validation error:", tokenError);
+      }
+
+      debugLog("Attempting to join class...");
+      
+      // ✅ ADD ADMIN BYPASS FOR MEDIA PERMISSIONS
+      if (userRole !== "admin") {
+        try {
+          debugLog("Requesting microphone permission...");
+          const stream = await navigator.mediaDevices.getUserMedia({ 
+            audio: true, 
+            video: true 
+          });
+          debugLog("Microphone and camera access granted");
+          stream.getTracks().forEach(track => track.stop());
+        } catch (err) {
+          console.error("❌ Microphone/camera permission denied:", err);
+          return;
+        }
+      } else {
+        debugLog("🛠️ Admin bypassing media permissions check");
       }
 
       const joinResponse = await API.post(`/live/join/${sessionId}`);
@@ -744,7 +777,6 @@ export default function LiveClass() {
       setIsMuted(participantInfo.isMuted);
       setHasSpeakingPermission(participantInfo.hasSpeakingPermission);
       
-      const userRole = localStorage.getItem("role");
       const isUserTeacher = participantInfo.role === "host" || userRole === "teacher" || userRole === "admin";
       setIsTeacher(isUserTeacher);
       
