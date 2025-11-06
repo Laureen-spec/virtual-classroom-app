@@ -136,15 +136,13 @@ export default function LiveClass() {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  // ✅ ADDED: Socket.io connection setup
+  // ✅ UPDATED: Socket.io connection setup with production URL
   useEffect(() => {
     const initializeSocket = () => {
-      const socketUrl = process.env.NODE_ENV === 'production' 
-        ? 'https://your-backend-url.com' 
-        : 'http://localhost:5000';
-      
-      const newSocket = io(socketUrl, {
-        transports: ['websocket', 'polling']
+      // ✅ FIXED: Updated Socket.io URL for production
+      const newSocket = io("https://virtual-classroom-app-8wbh.onrender.com", {
+        transports: ["websocket"],
+        withCredentials: true,
       });
 
       newSocket.on('connect', () => {
