@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import AgoraRTC from "agora-rtc-sdk-ng";
-import AgoraRTM from "agora-rtm-sdk";
+// Remove this line: import AgoraRTM from "agora-rtm-sdk";
 import API from "../api/axios";
 
 export default function LiveClass() {
@@ -9,7 +9,6 @@ export default function LiveClass() {
   const { sessionId } = useParams();
   const [joined, setJoined] = useState(false);
   const [localTracks, setLocalTracks] = useState({ audioTrack: null, videoTrack: null });
-  // add after localTracks state
   const localTracksRef = useRef({ audioTrack: null, videoTrack: null });
   const [remoteUsers, setRemoteUsers] = useState([]);
   const [sessionInfo, setSessionInfo] = useState(null);
@@ -24,6 +23,9 @@ export default function LiveClass() {
   const [isTeacher, setIsTeacher] = useState(false);
   const [pendingRequests, setPendingRequests] = useState([]);
 
+  // Add RTM client state
+  const [rtmClient, setRtmClient] = useState(null);
+  
   // Screen sharing state variables
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [screenShareTrack, setScreenShareTrack] = useState(null);
@@ -57,8 +59,7 @@ export default function LiveClass() {
   const appId = import.meta.env.VITE_AGORA_APP_ID;
   const client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
   
-  // RTM Refs
-  const rtmClientRef = useRef(null);
+  // RTM Refs - update to use state instead of ref
   const rtmChannelRef = useRef(null);
   
   const chatContainerRef = useRef(null);
@@ -134,6 +135,25 @@ export default function LiveClass() {
       console.error("Error unmuting student:", error);
     }
   };
+
+  // Dynamic import for Agora RTM
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const initializeRTMSDK = async () => {
+      try {
+        // Dynamic import to avoid SSR issues
+        const AgoraRTM = await import("agora-rtm-sdk");
+        const rtmClientInstance = AgoraRTM.default.createInstance(appId);
+        setRtmClient(rtmClientInstance);
+        debugLog("✅ Agora RTM SDK loaded dynamically");
+      } catch (error) {
+        console.error("❌ Failed to load Agora RTM SDK:", error);
+      }
+    };
+
+    initializeRTMSDK();
+  }, [appId]);
 
   // Check mobile device
   useEffect(() => {
@@ -868,12 +888,16 @@ export default function LiveClass() {
 
   // Initialize RTM and setup message handling
   const initializeRTM = async () => {
+    if (!rtmClient) {
+      console.error("RTM client not initialized");
+      return;
+    }
+
     try {
-      rtmClientRef.current = AgoraRTM.createInstance(appId);
-      await rtmClientRef.current.login({ uid: String(localStorage.getItem("userId")) });
+      await rtmClient.login({ uid: String(localStorage.getItem("userId")) });
       
-      // create and join channel (use same sessionId or channelName)
-      rtmChannelRef.current = await rtmClientRef.current.createChannel(sessionId.toString());
+      // create and join channel
+      rtmChannelRef.current = await rtmClient.createChannel(sessionId.toString());
       await rtmChannelRef.current.join();
 
       // listen for channel messages
@@ -893,7 +917,6 @@ export default function LiveClass() {
               await trackManagement.enableTrack(audioTrack, false);
             }
             setIsMuted(true);
-            // persist local UI
           } else if (data.type === "FORCE_UNMUTE") {
             // allow unmute only when teacher permitted
             if (data.allowSelfUnmute !== true) {
@@ -923,6 +946,13 @@ export default function LiveClass() {
       setIsJoinLoading(true);
       debugLog("Attempting to join class...");
       
+      // Wait for RTM client to be ready
+      if (!rtmClient) {
+        debugLog("Waiting for RTM client initialization...");
+        // Add a small delay to ensure RTM is loaded
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+
       // SIMPLIFIED AUTH CHECK - Only check token
       const token = localStorage.getItem("token");
       
@@ -1286,8 +1316,8 @@ export default function LiveClass() {
       if (rtmChannelRef.current) {
         await rtmChannelRef.current.leave();
       }
-      if (rtmClientRef.current) {
-        await rtmClientRef.current.logout();
+      if (rtmClient) {
+        await rtmClient.logout();
       }
       
       localTracksRef.current.audioTrack?.close();
@@ -1320,8 +1350,8 @@ export default function LiveClass() {
       if (rtmChannelRef.current) {
         rtmChannelRef.current.leave();
       }
-      if (rtmClientRef.current) {
-        rtmClientRef.current.logout();
+      if (rtmClient) {
+        rtmClient.logout();
       }
       
       localTracksRef.current.audioTrack?.close();
@@ -1690,18 +1720,18 @@ export default function LiveClass() {
                         )}
                       </div>
                       <div className="flex space-x-1 flex-shrink-0">
-                        {/* UPDATED: Mute/Unmute buttons with new functions */}
+                        {/* FIXED: Mute/Unmute buttons with Tailwind classes */}
                         {participant.isMuted ? (
                           <button 
                             onClick={() => unmuteStudentAudio(participant.studentId)} 
-                            className="btn btn-warning"
+                            className="bg-yellow-600 hover:bg-yellow-700 text-white px-3 py-1 rounded text-xs transition-colors"
                           >
                             Unmute
                           </button>
                         ) : (
                           <button 
                             onClick={() => muteStudentAudio(participant.studentId)} 
-                            className="btn btn-danger"
+                            className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-xs transition-colors"
                           >
                             Mute
                           </button>
