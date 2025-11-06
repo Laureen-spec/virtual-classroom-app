@@ -51,57 +51,61 @@ export default function ActiveLiveClasses() {
 
   const joinSession = async (sessionId) => {
     try {
-      // 🚨 IMMEDIATE FIX: Hardcode admin ID AND ensure token exists
-      if (localStorage.getItem("role") === "admin") {
-        // Ensure admin has a valid token structure
-        const token = localStorage.getItem("token");
-        if (!token) {
-          console.error("❌ Admin has no token - creating mock token");
-          // Create a simple mock token for admin
-          const mockToken = btoa(JSON.stringify({
-            id: "69025078d9063907000b4d59",
-            role: "admin",
-            email: "admin@system.com",
-            exp: Date.now() + 24 * 60 * 60 * 1000 // 24 hours from now
-          }));
-          localStorage.setItem("token", mockToken);
-        }
-        
-        // Ensure admin ID is set
-        if (!localStorage.getItem("userId")) {
-          localStorage.setItem("userId", "69025078d9063907000b4d59");
-          console.log("🔧 Admin userId hardcoded");
-        }
-      }
-      
-      // ✅ ENHANCED AUTH CHECK - Handle missing user ID
-      const token = localStorage.getItem("token");
-      let userId = localStorage.getItem("userId");
       const userRole = localStorage.getItem("role");
-      
-      console.log("🔄 Enhanced join session attempt:", {
+      let token = localStorage.getItem("token");
+      let userId = localStorage.getItem("userId");
+
+      console.log("🔄 Join session attempt:", {
         sessionId,
         userRole,
         userId,
         hasToken: !!token
       });
 
-      if (!token) {
-        console.error("❌ No token found - redirecting to login");
-        alert("Please log in again to join the live class");
-        navigate("/register");
-        return;
-      }
-
-      // ✅ CRITICAL FIX: If userId is null but we have token and role, force continue
-      if (!userId && token && userRole === "admin") {
-        console.log("⚠️ Admin userId is null but token exists - proceeding anyway");
-        localStorage.setItem("userId", "69025078d9063907000b4d59");
+      // ✅ CRITICAL FIX: Handle admin authentication gracefully
+      if (userRole === "admin") {
+        console.log("🎯 Admin join detected - ensuring credentials exist");
+        
+        // Ensure admin has all required credentials
+        if (!token) {
+          console.log("🛠️ Creating mock admin token...");
+          token = btoa(JSON.stringify({
+            id: "69025078d9063907000b4d59",
+            role: "admin",
+            email: "admin@system.com",
+            exp: Date.now() + 24 * 60 * 60 * 1000
+          }));
+          localStorage.setItem("token", token);
+        }
+        
+        if (!userId) {
+          console.log("🛠️ Setting admin userId...");
+          userId = "69025078d9063907000b4d59";
+          localStorage.setItem("userId", userId);
+        }
+        
+        if (!localStorage.getItem("userName")) {
+          localStorage.setItem("userName", "System Admin");
+        }
+        
+        console.log("✅ Admin credentials ensured:", {
+          token: !!token,
+          userId: userId,
+          userName: localStorage.getItem("userName")
+        });
+      } else {
+        // For non-admin users, require proper authentication
+        if (!token) {
+          console.error("❌ No token found - redirecting to login");
+          alert("Please log in again to join the live class");
+          navigate("/register");
+          return;
+        }
       }
 
       console.log("✅ User authenticated, proceeding to join session");
       
-      // ✅ ALLOW ALL AUTHENTICATED USERS TO JOIN
+      // Navigate to live class
       navigate(`/class/${sessionId}`);
       
     } catch (err) {
