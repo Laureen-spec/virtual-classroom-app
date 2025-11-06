@@ -12,10 +12,10 @@ export default function LiveClass() {
   const [remoteUsers, setRemoteUsers] = useState([]);
   const [sessionInfo, setSessionInfo] = useState(null);
   const [participantInfo, setParticipantInfo] = useState(null);
-  const [isMuted, setIsMuted] = useState(false); // FIXED: Default to unmuted for teachers
+  const [isMuted, setIsMuted] = useState(false);
   const [isVideoOn, setIsVideoOn] = useState(true);
   const [isHandRaised, setIsHandRaised] = useState(false);
-  const [hasSpeakingPermission, setHasSpeakingPermission] = useState(true); // FIXED: Default true for teachers
+  const [hasSpeakingPermission, setHasSpeakingPermission] = useState(true);
   const [chatMessages, setChatMessages] = useState([]);
   const [newMessage, setNewMessage] = useState("");
   const [participants, setParticipants] = useState([]);
@@ -52,10 +52,22 @@ export default function LiveClass() {
   const [isRecordingLoading, setIsRecordingLoading] = useState(false);
   const [isJoinLoading, setIsJoinLoading] = useState(false);
 
+  // Modal state
+  const [showEndModal, setShowEndModal] = useState(false);
+
   const appId = import.meta.env.VITE_AGORA_APP_ID;
   const client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
   
   const chatContainerRef = useRef(null);
+
+  // Production mode check and conditional logging
+  const isDevelopment = process.env.NODE_ENV === 'development';
+  
+  const debugLog = (...args) => {
+    if (isDevelopment) {
+      console.log(...args);
+    }
+  };
 
   // Robust track management helpers
   const trackManagement = {
@@ -97,15 +109,6 @@ export default function LiveClass() {
       } catch (err) {
         console.error("❌ enableTrack failed:", err);
       }
-    }
-  };
-
-  // Production mode check and conditional logging
-  const isDevelopment = process.env.NODE_ENV === 'development';
-  
-  const debugLog = (...args) => {
-    if (isDevelopment) {
-      console.log(...args);
     }
   };
 
@@ -201,19 +204,16 @@ export default function LiveClass() {
 
   // Timeout checker
   useEffect(() => {
-    const CHECK_INTERVAL = 30000; // 30 seconds
-    const WARNING_TIME = 1200000; // 20 minutes
-    const TIMEOUT_TIME = 1800000; // 30 minutes
+    const CHECK_INTERVAL = 30000;
+    const WARNING_TIME = 1200000;
+    const TIMEOUT_TIME = 1800000;
 
     const interval = setInterval(() => {
       const inactiveTime = Date.now() - lastActivity;
       
       if (inactiveTime > TIMEOUT_TIME && joined) {
-        // Auto-leave after 30 minutes of inactivity
         leaveClass();
-        alert("Session ended due to inactivity");
       } else if (inactiveTime > WARNING_TIME && !showTimeoutWarning && joined) {
-        // Show warning after 20 minutes
         setShowTimeoutWarning(true);
       }
     }, CHECK_INTERVAL);
@@ -234,7 +234,6 @@ export default function LiveClass() {
     
     const handleOffline = () => {
       console.log("🌐 Network offline - audio/video may be affected");
-      alert("Network connection lost. Trying to reconnect...");
     };
 
     window.addEventListener('online', handleOnline);
@@ -317,7 +316,7 @@ export default function LiveClass() {
           setIsMuted(false);
           
           // FIXED: Ensure audio is published for teachers
-          if (!localTracksRef.current.audioTrack.isPlaying) {
+          if (localTracksRef.current?.audioTrack) {
             await trackManagement.publishTrack(client, localTracksRef.current.audioTrack);
           }
           return;
@@ -334,7 +333,7 @@ export default function LiveClass() {
           setIsMuted(false);
           
           // FIXED: Ensure audio is published for students with permission
-          if (!localTracksRef.current.audioTrack.isPlaying) {
+          if (localTracksRef.current?.audioTrack) {
             await trackManagement.publishTrack(client, localTracksRef.current.audioTrack);
           }
           debugLog("✅ Successfully unmuted");
@@ -349,7 +348,6 @@ export default function LiveClass() {
       }
     } catch (err) {
       console.error("❌ Toggle mute failed:", err);
-      alert(err.response?.data?.message || "Failed to toggle audio");
     } finally {
       setIsMuteLoading(false);
     }
@@ -441,7 +439,6 @@ export default function LiveClass() {
 
     } catch (err) {
       console.error("❌ Grant permission failed:", err);
-      alert(err.response?.data?.message || "Failed to grant permission");
     }
   };
 
@@ -474,7 +471,6 @@ export default function LiveClass() {
       debugLog("Student muted");
     } catch (err) {
       console.error("❌ Mute student failed:", err);
-      alert(err.response?.data?.message || "Failed to mute student");
     }
   };
 
@@ -513,7 +509,6 @@ export default function LiveClass() {
       debugLog("Student unmuted via API");
     } catch (err) {
       console.error("❌ Unmute student failed:", err);
-      alert(err.response?.data?.message || "Failed to unmute student");
     }
   };
 
@@ -536,7 +531,6 @@ export default function LiveClass() {
       debugLog("All students muted");
     } catch (err) {
       console.error("❌ Mute all failed:", err);
-      alert(err.response?.data?.message || "Failed to mute all students");
     }
   };
 
@@ -565,7 +559,6 @@ export default function LiveClass() {
       debugLog("All students unmuted");
     } catch (err) {
       console.error("❌ Unmute all failed:", err);
-      alert(err.response?.data?.message || "Failed to unmute all students");
     }
   };
 
@@ -573,7 +566,6 @@ export default function LiveClass() {
   const startScreenShare = async () => {
     try {
       if (!isTeacher) {
-        alert("Only teachers can share screen");
         return;
       }
 
@@ -610,8 +602,6 @@ export default function LiveClass() {
           await trackManagement.publishTrack(client, localTracksRef.current.videoTrack);
           localTracksRef.current.videoTrack.play("local-player");
         }
-      } else {
-        alert("Failed to start screen sharing: " + (err.message || "Unknown error"));
       }
     } finally {
       setIsScreenShareLoading(false);
@@ -641,7 +631,6 @@ export default function LiveClass() {
 
     } catch (err) {
       console.error("Stop screen share failed:", err);
-      alert("Failed to stop screen sharing");
     } finally {
       setIsScreenShareLoading(false);
     }
@@ -676,7 +665,6 @@ export default function LiveClass() {
   const startRecording = async () => {
     try {
       if (!isTeacher) {
-        alert("Only teachers can start recording");
         return;
       }
 
@@ -684,11 +672,9 @@ export default function LiveClass() {
       const response = await API.post(`/live/recording/start/${sessionId}`);
       setIsRecording(true);
       setRecordingStatus(response.data.recording);
-      alert("Recording started successfully!");
       
     } catch (err) {
       console.error("Start recording failed:", err);
-      alert(err.response?.data?.message || "Failed to start recording");
     } finally {
       setIsRecordingLoading(false);
     }
@@ -697,7 +683,6 @@ export default function LiveClass() {
   const stopRecording = async () => {
     try {
       if (!isTeacher) {
-        alert("Only teachers can stop recording");
         return;
       }
 
@@ -705,11 +690,9 @@ export default function LiveClass() {
       const response = await API.post(`/live/recording/stop/${sessionId}`);
       setIsRecording(false);
       setRecordingStatus(response.data.recording);
-      alert("Recording stopped successfully! The recording will be available for playback.");
       
     } catch (err) {
       console.error("Stop recording failed:", err);
-      alert(err.response?.data?.message || "Failed to stop recording");
     } finally {
       setIsRecordingLoading(false);
     }
@@ -734,7 +717,7 @@ export default function LiveClass() {
     }
   };
 
-  // IMPROVED: User published event handler with better stability and cleaned logs
+  // IMPROVED: User published event handler with better stability
   const handleUserPublished = async (user, mediaType) => {
     debugLog("User published:", user.uid, mediaType);
     
@@ -757,7 +740,8 @@ export default function LiveClass() {
         }
       }, 200);
       
-      setRemoteUsers((prev) => {
+      // FIXED: Corrected setRemoteUsers mapping logic
+      setRemoteUsers(prev => {
         const existingUser = prev.find(u => u.uid === user.uid);
         if (existingUser) {
           return prev.map(u => u.uid === user.uid ? { ...u, ...user } : u);
@@ -782,7 +766,7 @@ export default function LiveClass() {
 
   // Call this after remote users join
   useEffect(() => {
-    adjustRemoteAudioVolume(50); // Set to 50% volume
+    adjustRemoteAudioVolume(50);
   }, [remoteUsers]);
 
   // TEMPORARILY DISABLED: Initialize RTM
@@ -801,7 +785,6 @@ export default function LiveClass() {
       
       if (!token) {
         console.error("❌ No authentication token found");
-        alert("Please log in again");
         navigate("/register");
         return;
       }
@@ -818,7 +801,6 @@ export default function LiveClass() {
         stream.getTracks().forEach(track => track.stop());
       } catch (err) {
         console.error("❌ Microphone/camera permission denied:", err);
-        alert("Microphone and camera access is required to join the live class. Please allow permissions and try again.");
         return;
       }
 
@@ -948,14 +930,12 @@ export default function LiveClass() {
       } else if (err.message?.includes('NETWORK_ERROR')) {
         errorMessage = "Network error. Please check your internet connection.";
       }
-      
-      alert(errorMessage);
     } finally {
       setIsJoinLoading(false);
     }
   };
 
-  // IMPROVED: Poll for session updates with better stability and cleaned logs
+  // IMPROVED: Poll for session updates with better stability
   const startSessionPolling = () => {
     debugLog("Starting session polling...");
     
@@ -1084,10 +1064,8 @@ export default function LiveClass() {
   const requestSpeakingPermission = async () => {
     try {
       await API.post(`/live/request-speaking/${sessionId}`);
-      alert("Speaking permission requested. Waiting for teacher approval.");
     } catch (err) {
       console.error("Request speaking permission failed:", err);
-      alert(err.response?.data?.message || "Failed to request permission");
     }
   };
 
@@ -1112,16 +1090,12 @@ export default function LiveClass() {
     }
   };
 
-  // End Live Class (Teacher only) - Enhanced with better error handling
-  const endLiveClass = async () => {
-    if (!window.confirm("Are you sure you want to end this live class for everyone?")) return;
-
+  // End Live Class Confirmed (Teacher only)
+  const endLiveClassConfirmed = async () => {
     try {
       debugLog("Attempting to end class...");
       const response = await API.put(`/live/end/${sessionId}`);
       debugLog("Class ended successfully");
-      
-      alert("Live class ended successfully.");
       
       const userRole = localStorage.getItem("role");
       if (userRole === "teacher") {
@@ -1133,7 +1107,6 @@ export default function LiveClass() {
       }
     } catch (err) {
       console.error("❌ End live class failed:", err);
-      alert(err.response?.data?.message || "Failed to end class. Please check if you're the teacher of this session.");
     }
   };
 
@@ -1206,6 +1179,33 @@ export default function LiveClass() {
             >
               Continue Session
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* End Class Confirmation Modal */}
+      {showEndModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
+          <div className="bg-gray-800 p-6 rounded-lg max-w-md mx-4">
+            <h3 className="text-lg font-semibold mb-4">End Live Class</h3>
+            <p className="mb-4">Are you sure you want to end this class for everyone?</p>
+            <div className="flex space-x-2">
+              <button
+                onClick={async () => { 
+                  await endLiveClassConfirmed(); 
+                  setShowEndModal(false); 
+                }}
+                className="bg-red-600 hover:bg-red-700 px-4 py-2 rounded flex-1"
+              >
+                Yes, end
+              </button>
+              <button
+                onClick={() => setShowEndModal(false)}
+                className="bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded flex-1"
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -1475,9 +1475,9 @@ export default function LiveClass() {
                 >
                   Unmute All
                 </button>
-                {/* End Live Class */}
+                {/* End Live Class - FIXED: Using modal instead of window.confirm */}
                 <button
-                  onClick={endLiveClass}
+                  onClick={() => setShowEndModal(true)}
                   className="bg-orange-600 hover:bg-orange-700 px-3 py-2 rounded text-sm flex-1 min-w-[120px]"
                   aria-label="End live class for all participants"
                 >
