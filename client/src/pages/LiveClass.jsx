@@ -7,15 +7,14 @@ export default function LiveClass() {
   const navigate = useNavigate();
   const { sessionId } = useParams();
   const [joined, setJoined] = useState(false);
-  const [localTracks, setLocalTracks] = useState({ audioTrack: null, videoTrack: null });
-  const localTracksRef = useRef({ audioTrack: null, videoTrack: null });
+  const [localTracks, setLocalTracks] = useState({ audio: null, video: null });
   const [remoteUsers, setRemoteUsers] = useState([]);
   const [sessionInfo, setSessionInfo] = useState(null);
   const [participantInfo, setParticipantInfo] = useState(null);
-  const [isMuted, setIsMuted] = useState(false);
+  const [isMuted, setIsMuted] = useState(true);
   const [isVideoOn, setIsVideoOn] = useState(true);
   const [isHandRaised, setIsHandRaised] = useState(false);
-  const [hasSpeakingPermission, setHasSpeakingPermission] = useState(true);
+  const [hasSpeakingPermission, setHasSpeakingPermission] = useState(false);
   const [chatMessages, setChatMessages] = useState([]);
   const [newMessage, setNewMessage] = useState("");
   const [participants, setParticipants] = useState([]);
@@ -57,7 +56,6 @@ export default function LiveClass() {
 
   const appId = import.meta.env.VITE_AGORA_APP_ID;
   const client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
-  
   const chatContainerRef = useRef(null);
 
   // Production mode check and conditional logging
@@ -69,71 +67,35 @@ export default function LiveClass() {
     }
   };
 
-  // Robust track management helpers
+  // Simple track management utilities (like your working version)
   const trackManagement = {
     publishTrack: async (client, track) => {
-      if (!track) return false;
       try {
-        await client.publish([track]);
-        debugLog(`✅ Published track: ${track.getTrackLabel?.() ?? 'track'}`);
+        await client.publish(track);
+        debugLog(`✅ ${track.getTrackLabel()} published successfully`);
         return true;
       } catch (error) {
-        console.error("❌ publishTrack error:", error);
+        console.error(`❌ Error publishing ${track.getTrackLabel()}:`, error);
         return false;
       }
     },
-
+    
     unpublishTrack: async (client, track) => {
-      if (!track) return false;
       try {
         await client.unpublish(track);
-        debugLog(`✅ Unpublished track: ${track.getTrackLabel?.() ?? 'track'}`);
+        debugLog(`✅ ${track.getTrackLabel()} unpublished successfully`);
         return true;
       } catch (error) {
-        console.warn("⚠️ unpublishTrack error (maybe not published):", error);
+        console.error(`❌ Error unpublishing ${track.getTrackLabel()}:`, error);
         return false;
       }
     },
-
-    enableTrack: async (track, enabled) => {
-      if (!track) return;
-      try {
-        if (typeof track.setEnabled === "function") {
-          await track.setEnabled(enabled);
-        } else if (enabled && typeof track.enable === "function") {
-          track.enable();
-        } else if (!enabled && typeof track.disable === "function") {
-          track.disable();
-        }
-        debugLog(`✅ Track ${track.getTrackLabel?.() ?? 'track'} ${enabled ? "enabled" : "disabled"}`);
-      } catch (err) {
-        console.error("❌ enableTrack failed:", err);
+    
+    enableTrack: (track, enabled) => {
+      if (track) {
+        track.setEnabled(enabled);
+        debugLog(`✅ ${track.getTrackLabel()} ${enabled ? 'enabled' : 'disabled'}`);
       }
-    }
-  };
-
-  // FIXED: Corrected mute/unmute student audio functions with proper endpoints
-  const muteStudentAudio = async (userId) => {
-    try {
-      setIsMuteLoading(true);
-      await API.put(`/live/mute/${sessionId}/${userId}`, { mute: true });
-      debugLog(`✅ Student ${userId} muted successfully`);
-    } catch (error) {
-      console.error("Error muting student:", error);
-    } finally {
-      setIsMuteLoading(false);
-    }
-  };
-
-  const unmuteStudentAudio = async (userId) => {
-    try {
-      setIsMuteLoading(true);
-      await API.put(`/live/mute/${sessionId}/${userId}`, { mute: false });
-      debugLog(`✅ Student ${userId} unmuted successfully`);
-    } catch (error) {
-      console.error("Error unmuting student:", error);
-    } finally {
-      setIsMuteLoading(false);
     }
   };
 
@@ -265,12 +227,12 @@ export default function LiveClass() {
   // Function to handle audio track updates when permission is granted
   const forceAudioUpdate = async () => {
     try {
-      if (localTracksRef.current?.audioTrack && hasSpeakingPermission) {
+      if (localTracks.audio && hasSpeakingPermission) {
         debugLog("🎯 Republishing audio track after permission grant");
         
-        await trackManagement.unpublishTrack(client, localTracksRef.current.audioTrack);
-        await trackManagement.enableTrack(localTracksRef.current.audioTrack, true);
-        await trackManagement.publishTrack(client, localTracksRef.current.audioTrack);
+        await trackManagement.unpublishTrack(client, localTracks.audio);
+        trackManagement.enableTrack(localTracks.audio, true);
+        await trackManagement.publishTrack(client, localTracks.audio);
         
         debugLog("✅ Audio track republished successfully after permission grant");
       }
@@ -279,27 +241,9 @@ export default function LiveClass() {
     }
   };
 
-  // Function to handle video track updates
-  const forceVideoUpdate = async () => {
-    try {
-      if (localTracksRef.current?.videoTrack && hasSpeakingPermission) {
-        await trackManagement.unpublishTrack(client, localTracksRef.current.videoTrack);
-        await trackManagement.publishTrack(client, localTracksRef.current.videoTrack);
-        debugLog("✅ Video track republished after permission grant");
-      }
-    } catch (error) {
-      console.error("❌ Error forcing video update:", error);
-    }
-  };
-
-  // Debug audio state
-  useEffect(() => {
-    debugLog("🎧 Audio state:", { isMuted, hasSpeakingPermission });
-  }, [isMuted, hasSpeakingPermission]);
-
-  // FIXED: Enhanced toggle mute function with proper teacher handling
+  // Enhanced toggle mute function with proper teacher handling
   const toggleMute = async () => {
-    if (!localTracksRef.current?.audioTrack || isMuteLoading) return;
+    if (!localTracks.audio || isMuteLoading) return;
 
     setIsMuteLoading(true);
     try {
@@ -312,13 +256,8 @@ export default function LiveClass() {
           } catch (e) {
             debugLog("Warning: backend self-unmute failed:", e?.message || e);
           }
-          await trackManagement.enableTrack(localTracksRef.current.audioTrack, true);
+          trackManagement.enableTrack(localTracks.audio, true);
           setIsMuted(false);
-          
-          // FIXED: Ensure audio is published for teachers
-          if (localTracksRef.current?.audioTrack) {
-            await trackManagement.publishTrack(client, localTracksRef.current.audioTrack);
-          }
           return;
         }
 
@@ -329,20 +268,15 @@ export default function LiveClass() {
         } else {
           debugLog("🎤 Unmuting with permission.");
           await API.put(`/live/self-unmute/${sessionId}`);
-          await trackManagement.enableTrack(localTracksRef.current.audioTrack, true);
+          trackManagement.enableTrack(localTracks.audio, true);
           setIsMuted(false);
-          
-          // FIXED: Ensure audio is published for students with permission
-          if (localTracksRef.current?.audioTrack) {
-            await trackManagement.publishTrack(client, localTracksRef.current.audioTrack);
-          }
           debugLog("✅ Successfully unmuted");
         }
       } else {
         // Muting is always allowed
         debugLog("🔇 Muting...");
         await API.put(`/live/self-mute/${sessionId}`);
-        await trackManagement.enableTrack(localTracksRef.current.audioTrack, false);
+        trackManagement.enableTrack(localTracks.audio, false);
         setIsMuted(true);
         debugLog("✅ Successfully muted");
       }
@@ -350,34 +284,6 @@ export default function LiveClass() {
       console.error("❌ Toggle mute failed:", err);
     } finally {
       setIsMuteLoading(false);
-    }
-  };
-
-  // Function to handle immediate permission updates
-  const handleImmediatePermissionUpdate = async (studentId, hasPermission) => {
-    try {
-      const sessionResponse = await API.get(`/live/session/${sessionId}`);
-      if (sessionResponse.data.participants) {
-        setParticipants(sessionResponse.data.participants);
-      }
-      
-      if (studentId === localStorage.getItem("userId") && hasPermission && localTracksRef.current?.audioTrack) {
-        debugLog("🎯 Immediate audio update for permission grant");
-        await trackManagement.enableTrack(localTracksRef.current.audioTrack, true);
-        setIsMuted(false);
-        
-        setTimeout(async () => {
-          try {
-            await trackManagement.unpublishTrack(client, localTracksRef.current.audioTrack);
-            await trackManagement.publishTrack(client, localTracksRef.current.audioTrack);
-            debugLog("✅ Audio track immediately republished");
-          } catch (error) {
-            console.error("❌ Immediate audio republish failed:", error);
-          }
-        }, 100);
-      }
-    } catch (error) {
-      console.error("❌ Immediate permission update failed:", error);
     }
   };
 
@@ -423,11 +329,11 @@ export default function LiveClass() {
       if (studentId === currentUserId) {
         setHasSpeakingPermission(true);
         setIsMuted(false);
-        if (localTracksRef.current?.audioTrack) {
-          await trackManagement.enableTrack(localTracksRef.current.audioTrack, true);
+        if (localTracks.audio) {
+          trackManagement.enableTrack(localTracks.audio, true);
           try {
-            await trackManagement.unpublishTrack(client, localTracksRef.current.audioTrack);
-            await trackManagement.publishTrack(client, localTracksRef.current.audioTrack);
+            await trackManagement.unpublishTrack(client, localTracks.audio);
+            await trackManagement.publishTrack(client, localTracks.audio);
             debugLog("✅ Audio republished after permission grant (local user)");
           } catch (err) {
             console.error("Error republishing after grant:", err);
@@ -462,9 +368,9 @@ export default function LiveClass() {
       const currentUserId = String(localStorage.getItem("userId"));
       if (String(studentId) === currentUserId) {
         setIsMuted(true);
-        if (localTracksRef.current?.audioTrack) {
-          await trackManagement.enableTrack(localTracksRef.current.audioTrack, false);
-          await trackManagement.unpublishTrack(client, localTracksRef.current.audioTrack).catch(()=>{});
+        if (localTracks.audio) {
+          trackManagement.enableTrack(localTracks.audio, false);
+          await trackManagement.unpublishTrack(client, localTracks.audio).catch(()=>{});
         }
       }
 
@@ -494,11 +400,11 @@ export default function LiveClass() {
       const currentUserId = String(localStorage.getItem("userId"));
       if (String(studentId) === currentUserId) {
         setIsMuted(false);
-        if (localTracksRef.current?.audioTrack) {
-          await trackManagement.enableTrack(localTracksRef.current.audioTrack, true);
+        if (localTracks.audio) {
+          trackManagement.enableTrack(localTracks.audio, true);
           try {
-            await trackManagement.unpublishTrack(client, localTracksRef.current.audioTrack);
-            await trackManagement.publishTrack(client, localTracksRef.current.audioTrack);
+            await trackManagement.unpublishTrack(client, localTracks.audio);
+            await trackManagement.publishTrack(client, localTracks.audio);
             debugLog("✅ Local user audio republished after teacher unmute");
           } catch (err) {
             console.error("Error republishing after teacher unmute:", err);
@@ -523,9 +429,9 @@ export default function LiveClass() {
 
       const currentUserId = String(localStorage.getItem("userId"));
       const currentParticipant = (participants || []).find(p => String(p.studentId) === currentUserId);
-      if (currentParticipant && currentParticipant.isMuted && localTracksRef.current?.audioTrack) {
+      if (currentParticipant && currentParticipant.isMuted && localTracks.audio) {
         setIsMuted(true);
-        await trackManagement.enableTrack(localTracksRef.current.audioTrack, false);
+        trackManagement.enableTrack(localTracks.audio, false);
       }
 
       debugLog("All students muted");
@@ -545,12 +451,12 @@ export default function LiveClass() {
 
       const currentUserId = String(localStorage.getItem("userId"));
       const currentParticipant = (participants || []).find(p => String(p.studentId) === currentUserId);
-      if (currentParticipant && !currentParticipant.isMuted && currentParticipant.hasSpeakingPermission && localTracksRef.current?.audioTrack) {
+      if (currentParticipant && !currentParticipant.isMuted && currentParticipant.hasSpeakingPermission && localTracks.audio) {
         setIsMuted(false);
-        await trackManagement.enableTrack(localTracksRef.current.audioTrack, true);
+        trackManagement.enableTrack(localTracks.audio, true);
         try {
-          await trackManagement.unpublishTrack(client, localTracksRef.current.audioTrack);
-          await trackManagement.publishTrack(client, localTracksRef.current.audioTrack);
+          await trackManagement.unpublishTrack(client, localTracks.audio);
+          await trackManagement.publishTrack(client, localTracks.audio);
         } catch (err) {
           console.error("Error republishing after unmute all:", err);
         }
@@ -575,8 +481,8 @@ export default function LiveClass() {
         encoderConfig: "1080p_1",
       }, "auto");
 
-      if (localTracksRef.current?.videoTrack) {
-        await trackManagement.unpublishTrack(client, localTracksRef.current.videoTrack);
+      if (localTracks.video) {
+        await trackManagement.unpublishTrack(client, localTracks.video);
       }
 
       await trackManagement.publishTrack(client, screenTrack);
@@ -598,9 +504,9 @@ export default function LiveClass() {
       console.error("Start screen share failed:", err);
       
       if (err.message?.includes('PERMISSION_DENIED') || err.name === 'NotAllowedError') {
-        if (localTracksRef.current?.videoTrack) {
-          await trackManagement.publishTrack(client, localTracksRef.current.videoTrack);
-          localTracksRef.current.videoTrack.play("local-player");
+        if (localTracks.video) {
+          await trackManagement.publishTrack(client, localTracks.video);
+          localTracks.video.play("local-player");
         }
       }
     } finally {
@@ -619,9 +525,9 @@ export default function LiveClass() {
         setScreenShareTrack(null);
       }
 
-      if (localTracksRef.current?.videoTrack) {
-        await trackManagement.publishTrack(client, localTracksRef.current.videoTrack);
-        localTracksRef.current.videoTrack.play("local-player");
+      if (localTracks.video) {
+        await trackManagement.publishTrack(client, localTracks.video);
+        localTracks.video.play("local-player");
       }
 
       await API.post(`/live/screen-share/stop/${sessionId}`);
@@ -647,12 +553,12 @@ export default function LiveClass() {
 
   // Toggle Video On/Off with loading state and track utilities
   const toggleVideo = async () => {
-    if (!localTracksRef.current?.videoTrack || isVideoLoading) return;
+    if (!localTracks.video || isVideoLoading) return;
 
     setIsVideoLoading(true);
     try {
       const newVideoState = !isVideoOn;
-      await trackManagement.enableTrack(localTracksRef.current.videoTrack, newVideoState);
+      trackManagement.enableTrack(localTracks.video, newVideoState);
       setIsVideoOn(newVideoState);
     } catch (err) {
       console.error("Toggle video failed:", err);
@@ -717,7 +623,7 @@ export default function LiveClass() {
     }
   };
 
-  // IMPROVED: User published event handler with better stability
+  // User published event handler with better stability
   const handleUserPublished = async (user, mediaType) => {
     debugLog("User published:", user.uid, mediaType);
     
@@ -740,8 +646,7 @@ export default function LiveClass() {
         }
       }, 200);
       
-      // FIXED: Corrected setRemoteUsers mapping logic
-      setRemoteUsers(prev => {
+      setRemoteUsers((prev) => {
         const existingUser = prev.find(u => u.uid === user.uid);
         if (existingUser) {
           return prev.map(u => u.uid === user.uid ? { ...u, ...user } : u);
@@ -769,13 +674,7 @@ export default function LiveClass() {
     adjustRemoteAudioVolume(50);
   }, [remoteUsers]);
 
-  // TEMPORARILY DISABLED: Initialize RTM
-  const initializeRTM = async () => {
-    debugLog("RTM temporarily disabled for deployment");
-    return;
-  };
-
-  // FIXED: Enhanced joinClass function with proper teacher audio handling
+  // Enhanced joinClass function with proper teacher audio handling
   const joinClass = async () => {
     try {
       setIsJoinLoading(true);
@@ -812,12 +711,12 @@ export default function LiveClass() {
       setSessionInfo(session);
       setParticipantInfo(participantInfo);
       
-      // FIXED: Proper teacher audio state initialization
+      // Proper teacher audio state initialization
       const userRole = localStorage.getItem("role");
       const isUserTeacher = participantInfo.role === "host" || userRole === "teacher" || userRole === "admin";
       setIsTeacher(isUserTeacher);
       
-      // FIXED: Teachers should NOT be muted by default
+      // Teachers should NOT be muted by default
       if (isUserTeacher) {
         setIsMuted(false);
         setHasSpeakingPermission(true);
@@ -830,8 +729,6 @@ export default function LiveClass() {
       debugLog("User role:", { isTeacher: isUserTeacher, participantRole: participantInfo.role });
 
       const uid = await client.join(appId, session.channelName, agoraToken, null);
-
-      await initializeRTM();
 
       debugLog("Creating microphone and camera tracks...");
       const [audioTrack, videoTrack] = await AgoraRTC.createMicrophoneAndCameraTracks(
@@ -850,21 +747,21 @@ export default function LiveClass() {
       
       debugLog("Tracks created");
 
-      localTracksRef.current = { audioTrack, videoTrack };
-      setLocalTracks({ audioTrack, videoTrack });
+      // FIXED: Use simple state like your working version
+      setLocalTracks({ audio: audioTrack, video: videoTrack });
 
-      // FIXED: Teachers should have audio enabled and published immediately
+      // Teachers should have audio enabled and published immediately
       if (isUserTeacher) {
-        await trackManagement.enableTrack(audioTrack, true);
+        trackManagement.enableTrack(audioTrack, true);
         setIsMuted(false);
         debugLog("🎯 Teacher audio enabled and ready to publish");
       } else {
         const shouldBeMuted = !!participantInfo?.isMuted;
         if (shouldBeMuted) {
-          await trackManagement.enableTrack(audioTrack, false);
+          trackManagement.enableTrack(audioTrack, false);
           setIsMuted(true);
         } else {
-          await trackManagement.enableTrack(audioTrack, true);
+          trackManagement.enableTrack(audioTrack, true);
           setIsMuted(false);
         }
       }
@@ -875,7 +772,7 @@ export default function LiveClass() {
         videoTrack.play("local-player");
       }
 
-      // FIXED: Teachers should publish audio immediately, students only if not muted
+      // Teachers should publish audio immediately, students only if not muted
       if (isUserTeacher || !isMuted) {
         await trackManagement.publishTrack(client, audioTrack);
         debugLog("✅ Audio published successfully");
@@ -935,7 +832,7 @@ export default function LiveClass() {
     }
   };
 
-  // IMPROVED: Poll for session updates with better stability
+  // Poll for session updates with better stability
   const startSessionPolling = () => {
     debugLog("Starting session polling...");
     
@@ -991,40 +888,31 @@ export default function LiveClass() {
           setPendingRequests(pending);
         }
 
-        // FIXED: Better audio state management
-        if (localTracks?.audioTrack) {
-          const userRole = localStorage.getItem("role");
-          const currentUserId = localStorage.getItem("userId");
-          const currentUser = participants?.find(p => String(p.studentId) === currentUserId);
-          
-          if (userRole === "student" && currentUser?.isMuted) {
-            localTracks.audioTrack.setEnabled(false);
-          } else if (userRole === "teacher") {
-            // Teachers should always have audio enabled
-            localTracks.audioTrack.setEnabled(true);
-          }
-        }
-
-        const currentUserId = String(localStorage.getItem("userId"));
+        // Better audio state management
+        const currentUserId = localStorage.getItem("userId");
         if (participants && currentUserId) {
-          const currentParticipant = (participants || []).find(p => String(p.studentId) === currentUserId);
+          const currentParticipant = participants.find(p => p.studentId === currentUserId);
           if (currentParticipant) {
+            // Update mute state only if changed
             if (currentParticipant.isMuted !== isMuted) {
               setIsMuted(currentParticipant.isMuted);
-              if (localTracksRef.current?.audioTrack) {
-                await trackManagement.enableTrack(localTracksRef.current.audioTrack, !currentParticipant.isMuted);
+              if (localTracks.audio) {
+                trackManagement.enableTrack(localTracks.audio, !currentParticipant.isMuted);
                 debugLog(`Audio ${currentParticipant.isMuted ? 'muted' : 'unmuted'} via polling`);
               }
             }
             
+            // Update permission state only if changed
             if (currentParticipant.hasSpeakingPermission !== hasSpeakingPermission) {
               setHasSpeakingPermission(currentParticipant.hasSpeakingPermission);
               
-              if (currentParticipant.hasSpeakingPermission && localTracksRef.current?.audioTrack) {
-                await trackManagement.enableTrack(localTracksRef.current.audioTrack, true);
+              // Only update audio if permission actually changed
+              if (currentParticipant.hasSpeakingPermission && localTracks.audio) {
+                trackManagement.enableTrack(localTracks.audio, true);
               }
             }
             
+            // Update hand raise state
             if (currentParticipant.isHandRaised !== isHandRaised) {
               setIsHandRaised(currentParticipant.isHandRaised);
             }
@@ -1117,8 +1005,8 @@ export default function LiveClass() {
         await stopScreenShare();
       }
       
-      localTracksRef.current.audioTrack?.close();
-      localTracksRef.current.videoTrack?.close();
+      localTracks.audio?.close();
+      localTracks.video?.close();
       await client.leave();
       await API.put(`/live/leave/${sessionId}`);
       setJoined(false);
@@ -1142,8 +1030,8 @@ export default function LiveClass() {
         screenShareTrack.close();
       }
       
-      localTracksRef.current.audioTrack?.close();
-      localTracksRef.current.videoTrack?.close();
+      localTracks.audio?.close();
+      localTracks.video?.close();
       client.leave();
       const intervals = window.liveClassIntervals || [];
       intervals.forEach(clearInterval);
@@ -1475,7 +1363,7 @@ export default function LiveClass() {
                 >
                   Unmute All
                 </button>
-                {/* End Live Class - FIXED: Using modal instead of window.confirm */}
+                {/* End Live Class - Using modal instead of window.confirm */}
                 <button
                   onClick={() => setShowEndModal(true)}
                   className="bg-orange-600 hover:bg-orange-700 px-3 py-2 rounded text-sm flex-1 min-w-[120px]"
@@ -1533,17 +1421,16 @@ export default function LiveClass() {
                         )}
                       </div>
                       <div className="flex space-x-1 flex-shrink-0">
-                        {/* FIXED: Corrected mute/unmute buttons with proper API calls */}
                         {participant.isMuted ? (
                           <button 
-                            onClick={() => unmuteStudentAudio(participant.studentId)} 
+                            onClick={() => unmuteStudent(participant.studentId)} 
                             className="bg-yellow-600 hover:bg-yellow-700 text-white px-3 py-1 rounded text-xs transition-colors"
                           >
                             Unmute
                           </button>
                         ) : (
                           <button 
-                            onClick={() => muteStudentAudio(participant.studentId)} 
+                            onClick={() => muteStudent(participant.studentId)} 
                             className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-xs transition-colors"
                           >
                             Mute
