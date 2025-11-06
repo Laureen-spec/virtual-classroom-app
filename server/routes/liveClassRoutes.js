@@ -703,7 +703,89 @@ router.put("/self-unmute/:sessionId", verifyToken, async (req, res) => {
   }
 });
 
-// 🔹 Mute All Students (Teacher only)
+// 🔹 Enhanced Mute/Unmute Student (Teacher only) - FIXED WITH IMMEDIATE RESPONSE
+router.put("/mute/:sessionId/:studentId", verifyToken, async (req, res) => {
+  try {
+    const { sessionId, studentId } = req.params;
+    const { mute } = req.body; // true or false
+
+    console.log("🎯 MUTE/UNMUTE REQUEST:", { sessionId, studentId, mute, teacherId: req.user.id });
+
+    // Check if user is teacher and owns the session
+    const liveSession = await LiveSession.findById(sessionId);
+    if (!liveSession) {
+      return res.status(404).json({ message: "Live session not found" });
+    }
+
+    if (liveSession.teacherId.toString() !== req.user.id) {
+      return res.status(403).json({ message: "Only the teacher can mute students" });
+    }
+
+    // Find and update participant
+    const participantIndex = liveSession.participants.findIndex(
+      p => p.studentId.toString() === studentId
+    );
+
+    if (participantIndex === -1) {
+      return res.status(404).json({ message: "Student not found in this session" });
+    }
+
+    // CRITICAL: Update mute status
+    liveSession.participants[participantIndex].isMuted = mute;
+
+    // CRITICAL: If muting, also revoke speaking permission temporarily
+    if (mute === true) {
+      liveSession.participants[participantIndex].hasSpeakingPermission = false;
+    }
+
+    // Add system message
+    const teacher = await User.findById(req.user.id);
+    const student = await User.findById(studentId);
+    const actionText = mute ? "muted" : "unmuted";
+    
+    liveSession.chatMessages.push({
+      userId: req.user.id,
+      userName: teacher.name,
+      message: `${teacher.name} ${actionText} ${student.name}`,
+      messageType: "system",
+      metadata: {
+        studentId: studentId,
+        action: mute ? "muted" : "unmuted",
+        audioEnabled: !mute
+      }
+    });
+
+    await liveSession.save();
+
+    console.log(`✅ Student ${actionText} successfully:`, studentId);
+
+    // CRITICAL FIX: Return complete participant data for immediate frontend sync
+    const updatedParticipant = liveSession.participants[participantIndex];
+    
+    res.json({
+      message: `Student ${actionText} successfully`,
+      studentId,
+      isMuted: mute,
+      // CRITICAL: Include immediate participant data for frontend synchronization
+      participant: {
+        studentId: updatedParticipant.studentId,
+        isMuted: updatedParticipant.isMuted,
+        hasSpeakingPermission: updatedParticipant.hasSpeakingPermission,
+        permissionRequested: updatedParticipant.permissionRequested,
+        role: updatedParticipant.role
+      },
+      // ADDITIONAL: Include timestamp for immediate updates
+      timestamp: new Date(),
+      immediateUpdate: true
+    });
+
+  } catch (error) {
+    console.error("❌ Error updating mute status:", error);
+    res.status(500).json({ message: "Failed to update mute status", error: error.message });
+  }
+});
+
+// 🔹 Mute All Students (Teacher only) - FIXED TO MUTE ALL NON-HOSTS
 router.put("/mute-all/:sessionId", verifyToken, async (req, res) => {
   try {
     const { sessionId } = req.params;
@@ -718,10 +800,15 @@ router.put("/mute-all/:sessionId", verifyToken, async (req, res) => {
       return res.status(403).json({ message: "Only the teacher can mute all students" });
     }
 
-    // Mute all audience participants
+    let mutedCount = 0;
+
+    // CRITICAL FIX: Mute all non-host participants (students)
     liveSession.participants.forEach((participant, index) => {
-      if (participant.role === "audience") {
+      if (participant.role !== "host") { // Mute everyone who isn't host/teacher
         liveSession.participants[index].isMuted = true;
+        // Also revoke speaking permission when muted
+        liveSession.participants[index].hasSpeakingPermission = false;
+        mutedCount++;
       }
     });
 
@@ -731,14 +818,28 @@ router.put("/mute-all/:sessionId", verifyToken, async (req, res) => {
       userId: req.user.id,
       userName: teacher.name,
       message: `${teacher.name} muted all students`,
-      messageType: "system"
+      messageType: "system",
+      metadata: {
+        action: "mute_all",
+        mutedCount: mutedCount
+      }
     });
 
     await liveSession.save();
 
+    console.log(`✅ All students muted: ${mutedCount} participants affected`);
+
     res.json({
       message: "All students muted successfully",
-      mutedCount: liveSession.participants.filter(p => p.role === "audience").length
+      mutedCount: mutedCount,
+      // CRITICAL: Return updated participants list for frontend sync
+      participants: liveSession.participants.map(p => ({
+        studentId: p.studentId,
+        isMuted: p.isMuted,
+        hasSpeakingPermission: p.hasSpeakingPermission,
+        permissionRequested: p.permissionRequested,
+        role: p.role
+      }))
     });
 
   } catch (error) {
@@ -747,7 +848,7 @@ router.put("/mute-all/:sessionId", verifyToken, async (req, res) => {
   }
 });
 
-// 🔹 Unmute All Students (Teacher only)
+// 🔹 Unmute All Students (Teacher only) - FIXED WITH BETTER LOGIC
 router.put("/unmute-all/:sessionId", verifyToken, async (req, res) => {
   try {
     const { sessionId } = req.params;
@@ -762,10 +863,15 @@ router.put("/unmute-all/:sessionId", verifyToken, async (req, res) => {
       return res.status(403).json({ message: "Only the teacher can unmute all students" });
     }
 
-    // Unmute all audience participants (only those with speaking permission)
+    let unmutedCount = 0;
+
+    // CRITICAL FIX: Unmute all non-host participants
     liveSession.participants.forEach((participant, index) => {
-      if (participant.role === "audience" && participant.hasSpeakingPermission) {
+      if (participant.role !== "host") {
         liveSession.participants[index].isMuted = false;
+        // Restore speaking permission when unmuted
+        liveSession.participants[index].hasSpeakingPermission = true;
+        unmutedCount++;
       }
     });
 
@@ -774,15 +880,29 @@ router.put("/unmute-all/:sessionId", verifyToken, async (req, res) => {
     liveSession.chatMessages.push({
       userId: req.user.id,
       userName: teacher.name,
-      message: `${teacher.name} unmuted all students with speaking permission`,
-      messageType: "system"
+      message: `${teacher.name} unmuted all students`,
+      messageType: "system",
+      metadata: {
+        action: "unmute_all", 
+        unmutedCount: unmutedCount
+      }
     });
 
     await liveSession.save();
 
+    console.log(`✅ All students unmuted: ${unmutedCount} participants affected`);
+
     res.json({
-      message: "All students with speaking permission unmuted successfully",
-      unmutedCount: liveSession.participants.filter(p => p.role === "audience" && p.hasSpeakingPermission).length
+      message: "All students unmuted successfully",
+      unmutedCount: unmutedCount,
+      // CRITICAL: Return updated participants list for frontend sync
+      participants: liveSession.participants.map(p => ({
+        studentId: p.studentId,
+        isMuted: p.isMuted,
+        hasSpeakingPermission: p.hasSpeakingPermission,
+        permissionRequested: p.permissionRequested,
+        role: p.role
+      }))
     });
 
   } catch (error) {
@@ -1062,59 +1182,6 @@ router.put("/hand/:sessionId", verifyToken, async (req, res) => {
   } catch (error) {
     console.error("Error updating hand status:", error);
     res.status(500).json({ message: "Failed to update hand status", error: error.message });
-  }
-});
-
-// 🔹 Enhanced Mute/Unmute Student (Teacher only)
-router.put("/mute/:sessionId/:studentId", verifyToken, async (req, res) => {
-  try {
-    const { sessionId, studentId } = req.params;
-    const { mute } = req.body; // true or false
-
-    // Check if user is teacher and owns the session
-    const liveSession = await LiveSession.findById(sessionId);
-    if (!liveSession) {
-      return res.status(404).json({ message: "Live session not found" });
-    }
-
-    if (liveSession.teacherId.toString() !== req.user.id) {
-      return res.status(403).json({ message: "Only the teacher can mute students" });
-    }
-
-    // Find and update participant
-    const participantIndex = liveSession.participants.findIndex(
-      p => p.studentId.toString() === studentId
-    );
-
-    if (participantIndex === -1) {
-      return res.status(404).json({ message: "Student not found in this session" });
-    }
-
-    liveSession.participants[participantIndex].isMuted = mute;
-
-    // Add system message
-    const teacher = await User.findById(req.user.id);
-    const student = await User.findById(studentId);
-    const actionText = mute ? "muted" : "unmuted";
-    
-    liveSession.chatMessages.push({
-      userId: req.user.id,
-      userName: teacher.name,
-      message: `${teacher.name} ${actionText} ${student.name}`,
-      messageType: "system"
-    });
-
-    await liveSession.save();
-
-    res.json({
-      message: `Student ${actionText} successfully`,
-      studentId,
-      isMuted: mute
-    });
-
-  } catch (error) {
-    console.error("Error updating mute status:", error);
-    res.status(500).json({ message: "Failed to update mute status", error: error.message });
   }
 });
 
