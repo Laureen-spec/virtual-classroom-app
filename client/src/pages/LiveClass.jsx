@@ -67,7 +67,7 @@ export default function LiveClass() {
     }
   };
 
-  // ✅ ADDED: Debug useEffect to monitor auth state
+  // ✅ ADDED: Debug useEffect for auth state
   useEffect(() => {
     console.log("🔍 LiveClass Component Mounted - Auth State:", {
       token: localStorage.getItem("token") ? "✅ EXISTS" : "❌ MISSING",
@@ -214,7 +214,7 @@ export default function LiveClass() {
         setTimeout(() => {
           fetchActiveSessions();
         }, 2000);
-    }
+      }
     };
     
     const handleOffline = () => {
@@ -715,7 +715,7 @@ export default function LiveClass() {
     adjustRemoteAudioVolume(50);
   }, [remoteUsers]);
 
-  // ✅ UPDATED: Enhanced joinClass function with comprehensive auth debug and admin bypass
+  // ✅ ENHANCED JOIN FUNCTION: Enhanced join function with comprehensive auth debug
   const joinClass = async () => {
     try {
       setIsJoinLoading(true);
