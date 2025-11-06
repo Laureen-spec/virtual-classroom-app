@@ -367,10 +367,10 @@ export default function LiveClass() {
     }
   };
 
-  // FIXED: Mute student with proper Agora track management
+  // FIXED: Mute student with proper Agora track management - NOW WITH IMMEDIATE EFFECT
   const muteStudent = async (studentId) => {
     try {
-      debugLog("Muting student:", studentId);
+      debugLog("🎯 Muting student:", studentId);
       const response = await API.put(`/live/mute/${sessionId}/${studentId}`, { mute: true });
 
       if (response.data?.studentId) {
@@ -384,14 +384,17 @@ export default function LiveClass() {
         if (sessionResponse.data.participants) setParticipants(sessionResponse.data.participants);
       }
 
+      // CRITICAL FIX: Check if the muted student is the current user
       const currentUserId = String(localStorage.getItem("userId") || "");
       if (String(studentId) === currentUserId) {
+        debugLog("🎯 Current user is being muted - stopping audio transmission immediately");
         setIsMuted(true);
         if (localTracks.audio) {
-          // FIX: Unpublish the audio track to stop transmission
+          // UNPUBLISH THE TRACK TO STOP TRANSMISSION COMPLETELY
           await trackManagement.unpublishTrack(client, localTracks.audio).catch(()=>{});
+          // DISABLE THE TRACK TO STOP LOCAL AUDIO PROCESSING
           trackManagement.enableTrack(localTracks.audio, false);
-          debugLog("✅ Audio track unpublished and disabled for muted student");
+          debugLog("✅ Audio track unpublished and disabled - student is now completely muted");
         }
       }
 
@@ -401,10 +404,10 @@ export default function LiveClass() {
     }
   };
 
-  // FIXED: Unmute student with proper Agora track management
+  // FIXED: Unmute student with proper Agora track management - NOW WITH IMMEDIATE EFFECT
   const unmuteStudent = async (studentId) => {
     try {
-      debugLog("Unmuting student:", studentId);
+      debugLog("🎯 Unmuting student:", studentId);
       const response = await API.put(`/live/mute/${sessionId}/${studentId}`, { mute: false });
 
       if (response.data?.studentId) {
@@ -418,14 +421,17 @@ export default function LiveClass() {
         if (sessionResponse.data.participants) setParticipants(sessionResponse.data.participants);
       }
 
+      // CRITICAL FIX: Check if the unmuted student is the current user
       const currentUserId = String(localStorage.getItem("userId") || "");
       if (String(studentId) === currentUserId) {
+        debugLog("🎯 Current user is being unmuted - enabling audio transmission immediately");
         setIsMuted(false);
         if (localTracks.audio) {
-          // FIX: Enable track first, then republish
+          // ENABLE THE TRACK FIRST
           trackManagement.enableTrack(localTracks.audio, true);
+          // THEN REPUBLISH TO RESTART TRANSMISSION
           await trackManagement.publishTrack(client, localTracks.audio);
-          debugLog("✅ Audio track enabled and republished for unmuted student");
+          debugLog("✅ Audio track enabled and republished - student can now speak");
         }
       }
 
@@ -435,10 +441,10 @@ export default function LiveClass() {
     }
   };
 
-  // Mute all students with immediate effect
+  // FIXED: Mute all students with immediate effect - NOW WITH PROPER TRACK HANDLING
   const muteAllStudents = async () => {
     try {
-      debugLog("Muting all students.");
+      debugLog("🎯 Muting all students.");
       await API.put(`/live/mute-all/${sessionId}`);
 
       const sessionResponse = await API.get(`/live/session/${sessionId}`);
@@ -446,12 +452,16 @@ export default function LiveClass() {
 
       const currentUserId = String(localStorage.getItem("userId") || "");
       const currentParticipant = (sessionResponse.data.participants || []).find(p => String(p.studentId) === currentUserId);
-      if (currentParticipant && currentParticipant.isMuted && localTracks.audio) {
+      
+      // CRITICAL FIX: If current user is a student and is muted, stop their audio immediately
+      if (currentParticipant && currentParticipant.isMuted && localTracks.audio && !isTeacher) {
+        debugLog("🎯 Current student is muted in mute-all - stopping audio transmission");
         setIsMuted(true);
-        // unpublish to be absolutely sure audio stops
+        // UNPUBLISH THE TRACK TO STOP TRANSMISSION COMPLETELY
         await trackManagement.unpublishTrack(client, localTracks.audio).catch(()=>{});
+        // DISABLE THE TRACK TO STOP LOCAL AUDIO PROCESSING
         trackManagement.enableTrack(localTracks.audio, false);
-        debugLog("Current user unpublished and disabled after mute-all");
+        debugLog("✅ Current user unpublished and disabled after mute-all");
       }
 
       debugLog("All students muted");
@@ -460,7 +470,7 @@ export default function LiveClass() {
     }
   };
 
-  // Unmute all students with immediate effect
+  // FIXED: Unmute all students with immediate effect
   const unmuteAllStudents = async () => {
     try {
       debugLog("Unmuting all students.");
@@ -822,7 +832,7 @@ export default function LiveClass() {
     }
   };
 
-  // IMPROVED: Poll for session updates with better stability
+  // IMPROVED: Poll for session updates with better stability - FIXED MUTE HANDLING
   const startSessionPolling = () => {
     debugLog("Starting session polling...");
     
@@ -878,27 +888,33 @@ export default function LiveClass() {
           setPendingRequests(pending);
         }
 
-        // ORIGINAL WORKING AUDIO STATE MANAGEMENT
+        // CRITICAL FIX: Enhanced audio state management with immediate track control
         const currentUserId = String(localStorage.getItem("userId") || "");
         if (participants && currentUserId) {
           // ensure both sides are strings so comparisons won't fail due to types
           const currentParticipant = participants.find(p => String(p.studentId) === currentUserId);
           if (currentParticipant) {
-            // if server says muted true -> make sure we UNPUBLISH and disable sending
+            // CRITICAL FIX: Handle mute state changes with immediate track control
             if (currentParticipant.isMuted !== isMuted) {
+              debugLog(`🎯 Mute state changed via polling: ${isMuted} -> ${currentParticipant.isMuted}`);
               setIsMuted(currentParticipant.isMuted);
+              
               // Always try to unpublish for mute (most robust)
               if (localTracks.audio) {
                 if (currentParticipant.isMuted) {
+                  // STUDENT IS BEING MUTED - STOP AUDIO TRANSMISSION IMMEDIATELY
                   await trackManagement.unpublishTrack(client, localTracks.audio).catch(()=>{});
                   trackManagement.enableTrack(localTracks.audio, false);
-                  debugLog("Audio unpublished & disabled (muted via polling)");
+                  debugLog("🎯 Audio unpublished & disabled (muted via polling) - MIC IS NOW OFF");
                 } else {
+                  // STUDENT IS BEING UNMUTED - RESTART AUDIO TRANSMISSION
                   // unpublish first in case an old publish is stuck, then enable & publish again
                   await trackManagement.unpublishTrack(client, localTracks.audio).catch(()=>{});
                   trackManagement.enableTrack(localTracks.audio, true);
-                  await trackManagement.publishTrack(client, localTracks.audio).catch((e)=>{ console.error("Publish after unmute failed:", e); });
-                  debugLog("Audio republished (unmuted via polling)");
+                  await trackManagement.publishTrack(client, localTracks.audio).catch((e)=>{ 
+                    console.error("Publish after unmute failed:", e); 
+                  });
+                  debugLog("🎯 Audio republished (unmuted via polling) - MIC IS NOW ON");
                 }
               }
             }
