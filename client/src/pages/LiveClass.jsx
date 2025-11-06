@@ -68,33 +68,46 @@ export default function LiveClass() {
   };
 
   // Simple track management utilities (from your working code)
+  // REPLACED: use arrays for publish/unpublish and return boolean
   const trackManagement = {
     publishTrack: async (client, track) => {
       try {
-        await client.publish(track);
-        console.log(`✅ ${track.getTrackLabel()} published successfully`);
+        // Agora expects an array of MediaTrack or single track in array form
+        await client.publish([track]);
+        debugLog(`✅ ${track.getTrackLabel?.() || 'track'} published successfully`);
         return true;
       } catch (error) {
-        console.error(`❌ Error publishing ${track.getTrackLabel()}:`, error);
+        console.error(`❌ Error publishing track:`, error);
         return false;
       }
     },
-    
+
     unpublishTrack: async (client, track) => {
       try {
-        await client.unpublish(track);
-        console.log(`✅ ${track.getTrackLabel()} unpublished successfully`);
+        await client.unpublish([track]);
+        debugLog(`✅ ${track.getTrackLabel?.() || 'track'} unpublished successfully`);
         return true;
       } catch (error) {
-        console.error(`❌ Error unpublishing ${track.getTrackLabel()}:`, error);
-        return false;
+        // try the single-argument fallback (some SDK builds tolerate this)
+        try {
+          await client.unpublish(track);
+          debugLog(`✅ unpublished with fallback`);
+          return true;
+        } catch (err2) {
+          console.error(`❌ Error unpublishing track:`, err2);
+          return false;
+        }
       }
     },
-    
+
     enableTrack: (track, enabled) => {
       if (track) {
-        track.setEnabled(enabled);
-        console.log(`✅ ${track.getTrackLabel()} ${enabled ? 'enabled' : 'disabled'}`);
+        try {
+          track.setEnabled(enabled);
+          debugLog(`✅ ${track.getTrackLabel?.() || 'track'} ${enabled ? 'enabled' : 'disabled'}`);
+        } catch (e) {
+          console.error("❌ enableTrack failed:", e);
+        }
       }
     }
   };
@@ -371,12 +384,12 @@ export default function LiveClass() {
         if (sessionResponse.data.participants) setParticipants(sessionResponse.data.participants);
       }
 
-      const currentUserId = String(localStorage.getItem("userId"));
+      const currentUserId = String(localStorage.getItem("userId") || "");
       if (String(studentId) === currentUserId) {
         setIsMuted(true);
         if (localTracks.audio) {
           // FIX: Unpublish the audio track to stop transmission
-          await trackManagement.unpublishTrack(client, localTracks.audio);
+          await trackManagement.unpublishTrack(client, localTracks.audio).catch(()=>{});
           trackManagement.enableTrack(localTracks.audio, false);
           debugLog("✅ Audio track unpublished and disabled for muted student");
         }
@@ -405,7 +418,7 @@ export default function LiveClass() {
         if (sessionResponse.data.participants) setParticipants(sessionResponse.data.participants);
       }
 
-      const currentUserId = String(localStorage.getItem("userId"));
+      const currentUserId = String(localStorage.getItem("userId") || "");
       if (String(studentId) === currentUserId) {
         setIsMuted(false);
         if (localTracks.audio) {
@@ -426,16 +439,19 @@ export default function LiveClass() {
   const muteAllStudents = async () => {
     try {
       debugLog("Muting all students.");
-      const response = await API.put(`/live/mute-all/${sessionId}`);
+      await API.put(`/live/mute-all/${sessionId}`);
 
       const sessionResponse = await API.get(`/live/session/${sessionId}`);
       if (sessionResponse.data.participants) setParticipants(sessionResponse.data.participants);
 
-      const currentUserId = String(localStorage.getItem("userId"));
-      const currentParticipant = (participants || []).find(p => String(p.studentId) === currentUserId);
+      const currentUserId = String(localStorage.getItem("userId") || "");
+      const currentParticipant = (sessionResponse.data.participants || []).find(p => String(p.studentId) === currentUserId);
       if (currentParticipant && currentParticipant.isMuted && localTracks.audio) {
         setIsMuted(true);
+        // unpublish to be absolutely sure audio stops
+        await trackManagement.unpublishTrack(client, localTracks.audio).catch(()=>{});
         trackManagement.enableTrack(localTracks.audio, false);
+        debugLog("Current user unpublished and disabled after mute-all");
       }
 
       debugLog("All students muted");
@@ -453,8 +469,8 @@ export default function LiveClass() {
       const sessionResponse = await API.get(`/live/session/${sessionId}`);
       if (sessionResponse.data.participants) setParticipants(sessionResponse.data.participants);
 
-      const currentUserId = String(localStorage.getItem("userId"));
-      const currentParticipant = (participants || []).find(p => String(p.studentId) === currentUserId);
+      const currentUserId = String(localStorage.getItem("userId") || "");
+      const currentParticipant = (sessionResponse.data.participants || []).find(p => String(p.studentId) === currentUserId);
       if (currentParticipant && !currentParticipant.isMuted && currentParticipant.hasSpeakingPermission && localTracks.audio) {
         setIsMuted(false);
         trackManagement.enableTrack(localTracks.audio, true);
@@ -863,26 +879,39 @@ export default function LiveClass() {
         }
 
         // ORIGINAL WORKING AUDIO STATE MANAGEMENT
-        const currentUserId = localStorage.getItem("userId");
+        const currentUserId = String(localStorage.getItem("userId") || "");
         if (participants && currentUserId) {
-          const currentParticipant = participants.find(p => p.studentId === currentUserId);
+          // ensure both sides are strings so comparisons won't fail due to types
+          const currentParticipant = participants.find(p => String(p.studentId) === currentUserId);
           if (currentParticipant) {
+            // if server says muted true -> make sure we UNPUBLISH and disable sending
             if (currentParticipant.isMuted !== isMuted) {
               setIsMuted(currentParticipant.isMuted);
+              // Always try to unpublish for mute (most robust)
               if (localTracks.audio) {
-                trackManagement.enableTrack(localTracks.audio, !currentParticipant.isMuted);
-                debugLog(`Audio ${currentParticipant.isMuted ? 'muted' : 'unmuted'} via polling`);
+                if (currentParticipant.isMuted) {
+                  await trackManagement.unpublishTrack(client, localTracks.audio).catch(()=>{});
+                  trackManagement.enableTrack(localTracks.audio, false);
+                  debugLog("Audio unpublished & disabled (muted via polling)");
+                } else {
+                  // unpublish first in case an old publish is stuck, then enable & publish again
+                  await trackManagement.unpublishTrack(client, localTracks.audio).catch(()=>{});
+                  trackManagement.enableTrack(localTracks.audio, true);
+                  await trackManagement.publishTrack(client, localTracks.audio).catch((e)=>{ console.error("Publish after unmute failed:", e); });
+                  debugLog("Audio republished (unmuted via polling)");
+                }
               }
             }
-            
+
+            // Speaking permission update
             if (currentParticipant.hasSpeakingPermission !== hasSpeakingPermission) {
               setHasSpeakingPermission(currentParticipant.hasSpeakingPermission);
-              
               if (currentParticipant.hasSpeakingPermission && localTracks.audio) {
                 trackManagement.enableTrack(localTracks.audio, true);
               }
             }
-            
+
+            // hand raise
             if (currentParticipant.isHandRaised !== isHandRaised) {
               setIsHandRaised(currentParticipant.isHandRaised);
             }
