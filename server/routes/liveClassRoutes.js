@@ -149,6 +149,16 @@ router.post("/join/:sessionId", verifyToken, async (req, res) => {
       timestamp: new Date().toISOString()
     });
 
+    // ✅ ADD THIS DEBUG TO VERIFY ADMIN DATA
+    if (req.user.role === "admin") {
+      console.log("🎯 ADMIN JOIN - Database User:", {
+        id: req.user.id,
+        email: req.user.email, 
+        name: req.user.name,
+        role: req.user.role
+      });
+    }
+
     // ✅ ADD THIS DEBUG TO SEE IF ADMIN REACHES HERE
     if (req.user.role === "admin") {
       console.log("🎯 ADMIN JOIN REACHED BACKEND - Token verification passed!");

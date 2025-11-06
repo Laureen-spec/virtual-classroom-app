@@ -72,7 +72,7 @@ export default function ActiveLiveClasses() {
           token = btoa(JSON.stringify({
             id: "69025078d9063907000b4d59",
             role: "admin",
-            email: "admin@system.com",
+            email: "admin@school.com", // ✅ FIXED: Match database email
             exp: Date.now() + 24 * 60 * 60 * 1000
           }));
           localStorage.setItem("token", token);
@@ -85,7 +85,7 @@ export default function ActiveLiveClasses() {
         }
         
         if (!localStorage.getItem("userName")) {
-          localStorage.setItem("userName", "System Admin");
+          localStorage.setItem("userName", "School Admin"); // ✅ FIXED: Match database name
         }
         
         console.log("✅ Admin credentials ensured:", {

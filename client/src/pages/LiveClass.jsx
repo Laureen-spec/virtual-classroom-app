@@ -278,11 +278,12 @@ export default function LiveClass() {
             const mockToken = btoa(JSON.stringify({
               id: "69025078d9063907000b4d59",
               role: "admin",
-              email: "admin@system.com",
+              email: "admin@school.com", // ✅ FIXED: Match database email
               exp: Date.now() + 24 * 60 * 60 * 1000
             }));
             localStorage.setItem("token", mockToken);
             localStorage.setItem("userId", "69025078d9063907000b4d59");
+            localStorage.setItem("userName", "School Admin"); // ✅ FIXED: Match database name
             console.log("✅ Mock admin credentials created - retrying join...");
             // Retry the join
             setTimeout(() => joinClass(), 1000);
