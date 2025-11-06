@@ -1,7 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import AgoraRTC from "agora-rtc-sdk-ng";
-// Remove this line: import AgoraRTM from "agora-rtm-sdk";
 import API from "../api/axios";
 
 export default function LiveClass() {
@@ -23,9 +22,6 @@ export default function LiveClass() {
   const [isTeacher, setIsTeacher] = useState(false);
   const [pendingRequests, setPendingRequests] = useState([]);
 
-  // Add RTM client state
-  const [rtmClient, setRtmClient] = useState(null);
-  
   // Screen sharing state variables
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [screenShareTrack, setScreenShareTrack] = useState(null);
@@ -58,9 +54,6 @@ export default function LiveClass() {
 
   const appId = import.meta.env.VITE_AGORA_APP_ID;
   const client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
-  
-  // RTM Refs - update to use state instead of ref
-  const rtmChannelRef = useRef(null);
   
   const chatContainerRef = useRef(null);
 
@@ -135,25 +128,6 @@ export default function LiveClass() {
       console.error("Error unmuting student:", error);
     }
   };
-
-  // Dynamic import for Agora RTM
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    const initializeRTMSDK = async () => {
-      try {
-        // Dynamic import to avoid SSR issues
-        const AgoraRTM = await import("agora-rtm-sdk");
-        const rtmClientInstance = AgoraRTM.default.createInstance(appId);
-        setRtmClient(rtmClientInstance);
-        debugLog("✅ Agora RTM SDK loaded dynamically");
-      } catch (error) {
-        console.error("❌ Failed to load Agora RTM SDK:", error);
-      }
-    };
-
-    initializeRTMSDK();
-  }, [appId]);
 
   // Check mobile device
   useEffect(() => {
@@ -469,16 +443,7 @@ export default function LiveClass() {
         }
       }
 
-      // Send RTM message for force unmute
-      if (rtmChannelRef.current) {
-        rtmChannelRef.current.sendMessage({ 
-          text: JSON.stringify({ 
-            type: "FORCE_UNMUTE", 
-            target: studentId, 
-            allowSelfUnmute: true 
-          }) 
-        });
-      }
+      debugLog("Permission granted successfully");
 
     } catch (err) {
       console.error("❌ Grant permission failed:", err);
@@ -513,16 +478,6 @@ export default function LiveClass() {
           // then unpublish (defensive)
           await trackManagement.unpublishTrack(client, localTracksRef.current.audioTrack).catch(()=>{});
         }
-      }
-
-      // Send RTM message for force mute
-      if (rtmChannelRef.current) {
-        rtmChannelRef.current.sendMessage({ 
-          text: JSON.stringify({ 
-            type: "FORCE_MUTE", 
-            target: studentId 
-          }) 
-        });
       }
 
       debugLog("Student muted");
@@ -567,17 +522,6 @@ export default function LiveClass() {
         }
       }
 
-      // Send RTM message for force unmute
-      if (rtmChannelRef.current) {
-        rtmChannelRef.current.sendMessage({ 
-          text: JSON.stringify({ 
-            type: "FORCE_UNMUTE", 
-            target: studentId, 
-            allowSelfUnmute: false 
-          }) 
-        });
-      }
-
       debugLog("Student unmuted via API");
     } catch (err) {
       console.error("❌ Unmute student failed:", err);
@@ -603,15 +547,7 @@ export default function LiveClass() {
         await trackManagement.enableTrack(localTracksRef.current.audioTrack, false);
       }
 
-      // Send RTM message to all for force mute
-      if (rtmChannelRef.current) {
-        rtmChannelRef.current.sendMessage({ 
-          text: JSON.stringify({ 
-            type: "FORCE_MUTE", 
-            target: "ALL" 
-          }) 
-        });
-      }
+      debugLog("All students muted");
     } catch (err) {
       console.error("❌ Mute all failed:", err);
       alert(err.response?.data?.message || "Failed to mute all students");
@@ -641,16 +577,7 @@ export default function LiveClass() {
         }
       }
 
-      // Send RTM message to all for force unmute
-      if (rtmChannelRef.current) {
-        rtmChannelRef.current.sendMessage({ 
-          text: JSON.stringify({ 
-            type: "FORCE_UNMUTE", 
-            target: "ALL",
-            allowSelfUnmute: true
-          }) 
-        });
-      }
+      debugLog("All students unmuted");
     } catch (err) {
       console.error("❌ Unmute all failed:", err);
       alert(err.response?.data?.message || "Failed to unmute all students");
@@ -886,58 +813,10 @@ export default function LiveClass() {
     adjustRemoteAudioVolume(50); // Set to 50% volume
   }, [remoteUsers]);
 
-  // Initialize RTM and setup message handling
+  // TEMPORARILY DISABLED: Initialize RTM
   const initializeRTM = async () => {
-    if (!rtmClient) {
-      console.error("RTM client not initialized");
-      return;
-    }
-
-    try {
-      await rtmClient.login({ uid: String(localStorage.getItem("userId")) });
-      
-      // create and join channel
-      rtmChannelRef.current = await rtmClient.createChannel(sessionId.toString());
-      await rtmChannelRef.current.join();
-
-      // listen for channel messages
-      rtmChannelRef.current.on("ChannelMessage", async (message, senderId) => {
-        try {
-          const data = typeof message === "string" ? JSON.parse(message) : message;
-          if (!data || !data.type) return;
-
-          const myId = String(localStorage.getItem("userId"));
-          const target = data.target ? String(data.target) : "ALL";
-          if (target !== "ALL" && target !== myId) return;
-
-          const audioTrack = localTracksRef.current?.audioTrack;
-
-          if (data.type === "FORCE_MUTE") {
-            if (audioTrack) {
-              await trackManagement.enableTrack(audioTrack, false);
-            }
-            setIsMuted(true);
-          } else if (data.type === "FORCE_UNMUTE") {
-            // allow unmute only when teacher permitted
-            if (data.allowSelfUnmute !== true) {
-              // teacher is forcing unmute; we enable audio
-              if (audioTrack) await trackManagement.enableTrack(audioTrack, true);
-              setIsMuted(false);
-            } else {
-              // allow student-level unmute if permitted
-              if (audioTrack) await trackManagement.enableTrack(audioTrack, true);
-              setIsMuted(false);
-            }
-          }
-        } catch (e) {
-          console.error("RTM ChannelMessage handler error", e);
-        }
-      });
-      
-      debugLog("RTM initialized and joined channel");
-    } catch (error) {
-      console.error("RTM initialization failed:", error);
-    }
+    debugLog("RTM temporarily disabled for deployment");
+    return;
   };
 
   // Fetch session info and join class with cleaned logs and track utilities
@@ -946,13 +825,6 @@ export default function LiveClass() {
       setIsJoinLoading(true);
       debugLog("Attempting to join class...");
       
-      // Wait for RTM client to be ready
-      if (!rtmClient) {
-        debugLog("Waiting for RTM client initialization...");
-        // Add a small delay to ensure RTM is loaded
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      }
-
       // SIMPLIFIED AUTH CHECK - Only check token
       const token = localStorage.getItem("token");
       
@@ -1007,7 +879,7 @@ export default function LiveClass() {
       // Join Agora channel
       const uid = await client.join(appId, session.channelName, agoraToken, null);
 
-      // Initialize RTM
+      // Initialize RTM (temporarily disabled)
       await initializeRTM();
 
       // Create local tracks with audio optimization
@@ -1312,14 +1184,6 @@ export default function LiveClass() {
         await stopScreenShare();
       }
       
-      // Leave RTM
-      if (rtmChannelRef.current) {
-        await rtmChannelRef.current.leave();
-      }
-      if (rtmClient) {
-        await rtmClient.logout();
-      }
-      
       localTracksRef.current.audioTrack?.close();
       localTracksRef.current.videoTrack?.close();
       await client.leave();
@@ -1344,14 +1208,6 @@ export default function LiveClass() {
       // Stop screen sharing if active
       if (screenShareTrack) {
         screenShareTrack.close();
-      }
-      
-      // Leave RTM
-      if (rtmChannelRef.current) {
-        rtmChannelRef.current.leave();
-      }
-      if (rtmClient) {
-        rtmClient.logout();
       }
       
       localTracksRef.current.audioTrack?.close();
