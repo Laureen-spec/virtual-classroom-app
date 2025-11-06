@@ -78,11 +78,9 @@ export default function LiveClass() {
   }, [sessionId]);
 
   // Simple track management utilities (from your working code)
-  // REPLACED: use arrays for publish/unpublish and return boolean
   const trackManagement = {
     publishTrack: async (client, track) => {
       try {
-        // Agora expects an array of MediaTrack or single track in array form
         await client.publish([track]);
         debugLog(`✅ ${track.getTrackLabel?.() || 'track'} published successfully`);
         return true;
@@ -98,7 +96,6 @@ export default function LiveClass() {
         debugLog(`✅ ${track.getTrackLabel?.() || 'track'} unpublished successfully`);
         return true;
       } catch (error) {
-        // try the single-argument fallback (some SDK builds tolerate this)
         try {
           await client.unpublish(track);
           debugLog(`✅ unpublished with fallback`);
@@ -133,6 +130,162 @@ export default function LiveClass() {
     
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
+
+  // ✅ ENHANCED JOIN FUNCTION: Enhanced join function with comprehensive auth debug
+  const joinClass = async () => {
+    try {
+      setIsJoinLoading(true);
+      
+      // ✅ ADD COMPREHENSIVE AUTH DEBUG
+      const token = localStorage.getItem("token");
+      const userId = localStorage.getItem("userId");
+      const userRole = localStorage.getItem("role");
+      
+      console.log("🔄 ADMIN JOIN DEBUG:", {
+        token: token ? "✅ EXISTS" : "❌ MISSING",
+        userId: userId || "❌ MISSING",
+        userRole: userRole || "❌ MISSING",
+        sessionId: sessionId
+      });
+
+      // ✅ CRITICAL FIX: Handle admin with missing userId
+      if (userRole === "admin" && !userId) {
+        console.log("🛠️ Admin detected with missing userId - setting default admin ID");
+        localStorage.setItem("userId", "69025078d9063907000b4d59");
+      }
+
+      if (!token) {
+        console.error("❌ No authentication token found - redirecting to login");
+        navigate("/register");
+        return;
+      }
+
+      debugLog("Attempting to join class...");
+      
+      // ✅ ADD ADMIN BYPASS FOR MEDIA PERMISSIONS
+      if (userRole !== "admin") {
+        try {
+          debugLog("Requesting microphone permission...");
+          const stream = await navigator.mediaDevices.getUserMedia({ 
+            audio: true, 
+            video: true 
+          });
+          debugLog("Microphone and camera access granted");
+          stream.getTracks().forEach(track => track.stop());
+        } catch (err) {
+          console.error("❌ Microphone/camera permission denied:", err);
+          alert("Microphone and camera access is required to join the class.");
+          return;
+        }
+      } else {
+        debugLog("🛠️ Admin bypassing media permissions check");
+      }
+
+      const joinResponse = await API.post(`/live/join/${sessionId}`);
+      debugLog("Join response received");
+      
+      const { session, token: agoraToken, participantInfo } = joinResponse.data;
+      
+      setSessionInfo(session);
+      setParticipantInfo(participantInfo);
+      setIsMuted(participantInfo.isMuted);
+      setHasSpeakingPermission(participantInfo.hasSpeakingPermission);
+      
+      const isUserTeacher = participantInfo.role === "host" || userRole === "teacher" || userRole === "admin";
+      setIsTeacher(isUserTeacher);
+      
+      debugLog("User role:", { isTeacher: isUserTeacher, participantRole: participantInfo.role });
+
+      const uid = await client.join(appId, session.channelName, agoraToken, null);
+
+      debugLog("Creating microphone and camera tracks...");
+      const [audioTrack, videoTrack] = await AgoraRTC.createMicrophoneAndCameraTracks(
+        {
+          AEC: true,
+          ANS: true, 
+          AGC: true,
+          encoderConfig: {
+            sampleRate: 48000,
+            stereo: false,
+            bitrate: 64
+          }
+        }, 
+        {}
+      );
+      
+      debugLog("Tracks created");
+
+      // ORIGINAL WORKING TRACK SETUP
+      setLocalTracks({ audio: audioTrack, video: videoTrack });
+      videoTrack.play("local-player");
+
+      // Setup remote user handling with improved stability
+      client.on("user-published", handleUserPublished);
+
+      client.on("user-unpublished", (user, mediaType) => {
+        debugLog("User unpublished:", user.uid, mediaType);
+        
+        if (mediaType === "video" && user.videoTrack) {
+          user.videoTrack.stop();
+        }
+        
+        if (mediaType === "audio" && user.audioTrack) {
+          user.audioTrack.stop();
+        }
+        
+        setRemoteUsers((prev) => prev.filter((u) => u.uid !== user.uid));
+      });
+
+      client.on("user-joined", (user) => {
+        debugLog("User joined:", user.uid);
+      });
+
+      client.on("user-left", (user) => {
+        debugLog("User left:", user.uid);
+        setRemoteUsers((prev) => prev.filter((u) => u.uid !== user.uid));
+      });
+
+      // ORIGINAL WORKING PUBLISH - Simple and direct
+      debugLog("Publishing audio and video tracks...");
+      await trackManagement.publishTrack(client, audioTrack);
+      await trackManagement.publishTrack(client, videoTrack);
+      debugLog("Tracks published successfully");
+      
+      setJoined(true);
+
+      // Start polling for session updates
+      startSessionPolling();
+
+    } catch (err) {
+      console.error("❌ Join failed:", err);
+      
+      let errorMessage = "Failed to join class. Please try again.";
+      
+      // ✅ FIX: REMOVE AUTOMATIC REDIRECT FOR ADMIN
+      if (err.response?.status === 401) {
+        if (localStorage.getItem("role") === "admin") {
+          errorMessage = "Admin authentication issue. Please check your admin credentials.";
+          console.log("🔧 Admin 401 error - not redirecting to login");
+        } else {
+          errorMessage = "Authentication failed. Please log in again.";
+          navigate("/register");
+        }
+      } else if (err.response?.status === 404) {
+        errorMessage = "Live session not found or has ended.";
+      } else if (err.response?.status === 403) {
+        errorMessage = "You don't have permission to join this session.";
+      } else if (err.name === 'NotAllowedError') {
+        errorMessage = "Microphone and camera access is required. Please allow permissions and try again.";
+      } else if (err.message?.includes('NETWORK_ERROR')) {
+        errorMessage = "Network error. Please check your internet connection.";
+      }
+      
+      // ✅ ADD: Show error message without redirecting admin
+      alert(errorMessage);
+    } finally {
+      setIsJoinLoading(false);
+    }
+  };
 
   // Input sanitization function
   const sanitizeMessage = (text) => {
@@ -508,161 +661,6 @@ export default function LiveClass() {
     }
   };
 
-  // Start Screen Sharing with loading state and track utilities
-  const startScreenShare = async () => {
-    try {
-      if (!isTeacher) {
-        return;
-      }
-
-      setIsScreenShareLoading(true);
-
-      const screenTrack = await AgoraRTC.createScreenVideoTrack({
-        encoderConfig: "1080p_1",
-      }, "auto");
-
-      if (localTracks.video) {
-        await trackManagement.unpublishTrack(client, localTracks.video);
-      }
-
-      await trackManagement.publishTrack(client, screenTrack);
-      
-      if (Array.isArray(screenTrack)) {
-        screenTrack[0].play("local-player");
-        setScreenShareTrack(screenTrack[0]);
-      } else {
-        screenTrack.play("local-player");
-        setScreenShareTrack(screenTrack);
-      }
-
-      await API.post(`/live/screen-share/start/${sessionId}`);
-      setIsScreenSharing(true);
-      
-      debugLog("Screen sharing started successfully");
-
-    } catch (err) {
-      console.error("Start screen share failed:", err);
-      
-      if (err.message?.includes('PERMISSION_DENIED') || err.name === 'NotAllowedError') {
-        if (localTracks.video) {
-          await trackManagement.publishTrack(client, localTracks.video);
-          localTracks.video.play("local-player");
-        }
-      }
-    } finally {
-      setIsScreenShareLoading(false);
-    }
-  };
-
-  // Stop Screen Sharing with loading state and track utilities
-  const stopScreenShare = async () => {
-    try {
-      setIsScreenShareLoading(true);
-
-      if (screenShareTrack) {
-        await trackManagement.unpublishTrack(client, screenShareTrack);
-        screenShareTrack.close();
-        setScreenShareTrack(null);
-      }
-
-      if (localTracks.video) {
-        await trackManagement.publishTrack(client, localTracks.video);
-        localTracks.video.play("local-player");
-      }
-
-      await API.post(`/live/screen-share/stop/${sessionId}`);
-      setIsScreenSharing(false);
-      
-      debugLog("Screen sharing stopped");
-
-    } catch (err) {
-      console.error("Stop screen share failed:", err);
-    } finally {
-      setIsScreenShareLoading(false);
-    }
-  };
-
-  // Toggle Screen Sharing with loading state
-  const toggleScreenShare = async () => {
-    if (isScreenSharing) {
-      await stopScreenShare();
-    } else {
-      await startScreenShare();
-    }
-  };
-
-  // Toggle Video On/Off with loading state and track utilities
-  const toggleVideo = async () => {
-    if (!localTracks.video || isVideoLoading) return;
-
-    setIsVideoLoading(true);
-    try {
-      const newVideoState = !isVideoOn;
-      trackManagement.enableTrack(localTracks.video, newVideoState);
-      setIsVideoOn(newVideoState);
-    } catch (err) {
-      console.error("Toggle video failed:", err);
-    } finally {
-      setIsVideoLoading(false);
-    }
-  };
-
-  // Recording functions with loading states
-  const startRecording = async () => {
-    try {
-      if (!isTeacher) {
-        return;
-      }
-
-      setIsRecordingLoading(true);
-      const response = await API.post(`/live/recording/start/${sessionId}`);
-      setIsRecording(true);
-      setRecordingStatus(response.data.recording);
-      
-    } catch (err) {
-      console.error("Start recording failed:", err);
-    } finally {
-      setIsRecordingLoading(false);
-    }
-  };
-
-  const stopRecording = async () => {
-    try {
-      if (!isTeacher) {
-        return;
-      }
-
-      setIsRecordingLoading(true);
-      const response = await API.post(`/live/recording/stop/${sessionId}`);
-      setIsRecording(false);
-      setRecordingStatus(response.data.recording);
-      
-    } catch (err) {
-      console.error("Stop recording failed:", err);
-    } finally {
-      setIsRecordingLoading(false);
-    }
-  };
-
-  const toggleRecording = async () => {
-    if (isRecording) {
-      await stopRecording();
-    } else {
-      await startRecording();
-    }
-  };
-
-  // Update recording status
-  const updateRecordingStatus = async () => {
-    try {
-      const response = await API.get(`/live/recording/status/${sessionId}`);
-      setRecordingStatus(response.data.recording);
-      setIsRecording(response.data.recording.isRecording);
-    } catch (err) {
-      console.error("Error fetching recording status:", err);
-    }
-  };
-
   // IMPROVED: User published event handler with better stability
   const handleUserPublished = async (user, mediaType) => {
     debugLog("User published:", user.uid, mediaType);
@@ -698,164 +696,6 @@ export default function LiveClass() {
       
     } catch (error) {
       console.error("❌ Error subscribing to user:", error);
-    }
-  };
-
-  // Adjust audio volume for all remote users
-  const adjustRemoteAudioVolume = (volume = 50) => {
-    remoteUsers.forEach(user => {
-      if (user.audioTrack) {
-        user.audioTrack.setVolume(volume);
-      }
-    });
-  };
-
-  // Call this after remote users join
-  useEffect(() => {
-    adjustRemoteAudioVolume(50);
-  }, [remoteUsers]);
-
-  // ✅ ENHANCED JOIN FUNCTION: Enhanced join function with comprehensive auth debug
-  const joinClass = async () => {
-    try {
-      setIsJoinLoading(true);
-      
-      // ✅ ADD COMPREHENSIVE AUTH DEBUG
-      const token = localStorage.getItem("token");
-      const userId = localStorage.getItem("userId");
-      const userRole = localStorage.getItem("role");
-      
-      console.log("🔄 ADMIN JOIN DEBUG:", {
-        token: token ? "✅ EXISTS" : "❌ MISSING",
-        userId: userId || "❌ MISSING",
-        userRole: userRole || "❌ MISSING",
-        sessionId: sessionId
-      });
-
-      if (!token) {
-        console.error("❌ No authentication token found - redirecting to login");
-        navigate("/register");
-        return;
-      }
-
-      debugLog("Attempting to join class...");
-      
-      // ✅ ADD ADMIN BYPASS FOR MEDIA PERMISSIONS
-      if (userRole !== "admin") {
-        try {
-          debugLog("Requesting microphone permission...");
-          const stream = await navigator.mediaDevices.getUserMedia({ 
-            audio: true, 
-            video: true 
-          });
-          debugLog("Microphone and camera access granted");
-          stream.getTracks().forEach(track => track.stop());
-        } catch (err) {
-          console.error("❌ Microphone/camera permission denied:", err);
-          return;
-        }
-      } else {
-        debugLog("🛠️ Admin bypassing media permissions check");
-      }
-
-      const joinResponse = await API.post(`/live/join/${sessionId}`);
-      debugLog("Join response received");
-      
-      const { session, token: agoraToken, participantInfo } = joinResponse.data;
-      
-      setSessionInfo(session);
-      setParticipantInfo(participantInfo);
-      setIsMuted(participantInfo.isMuted);
-      setHasSpeakingPermission(participantInfo.hasSpeakingPermission);
-      
-      const isUserTeacher = participantInfo.role === "host" || userRole === "teacher" || userRole === "admin";
-      setIsTeacher(isUserTeacher);
-      
-      debugLog("User role:", { isTeacher: isUserTeacher, participantRole: participantInfo.role });
-
-      const uid = await client.join(appId, session.channelName, agoraToken, null);
-
-      debugLog("Creating microphone and camera tracks...");
-      const [audioTrack, videoTrack] = await AgoraRTC.createMicrophoneAndCameraTracks(
-        {
-          AEC: true,
-          ANS: true, 
-          AGC: true,
-          encoderConfig: {
-            sampleRate: 48000,
-            stereo: false,
-            bitrate: 64
-          }
-        }, 
-        {}
-      );
-      
-      debugLog("Tracks created");
-
-      // ORIGINAL WORKING TRACK SETUP
-      setLocalTracks({ audio: audioTrack, video: videoTrack });
-      videoTrack.play("local-player");
-
-      // Setup remote user handling with improved stability
-      client.on("user-published", handleUserPublished);
-
-      client.on("user-unpublished", (user, mediaType) => {
-        debugLog("User unpublished:", user.uid, mediaType);
-        
-        if (mediaType === "video" && user.videoTrack) {
-          user.videoTrack.stop();
-        }
-        
-        if (mediaType === "audio" && user.audioTrack) {
-          user.audioTrack.stop();
-        }
-        
-        setRemoteUsers((prev) => prev.filter((u) => u.uid !== user.uid));
-      });
-
-      client.on("user-joined", (user) => {
-        debugLog("User joined:", user.uid);
-      });
-
-      client.on("user-left", (user) => {
-        debugLog("User left:", user.uid);
-        setRemoteUsers((prev) => prev.filter((u) => u.uid !== user.uid));
-      });
-
-      // ORIGINAL WORKING PUBLISH - Simple and direct
-      debugLog("Publishing audio and video tracks...");
-      await trackManagement.publishTrack(client, audioTrack);
-      await trackManagement.publishTrack(client, videoTrack);
-      debugLog("Tracks published successfully");
-      
-      setJoined(true);
-
-      // Start polling for session updates
-      startSessionPolling();
-
-    } catch (err) {
-      console.error("❌ Join failed:", err);
-      
-      let errorMessage = "Failed to join class. Please try again.";
-      
-      // ✅ FIX: REMOVE AUTOMATIC REDIRECT FOR ADMIN
-      if (err.response?.status === 401 && localStorage.getItem("role") !== "admin") {
-        errorMessage = "Authentication failed. Please log in again.";
-        navigate("/register");
-      } else if (err.response?.status === 404) {
-        errorMessage = "Live session not found or has ended.";
-      } else if (err.response?.status === 403) {
-        errorMessage = "You don't have permission to join this session.";
-      } else if (err.name === 'NotAllowedError') {
-        errorMessage = "Microphone and camera access is required. Please allow permissions and try again.";
-      } else if (err.message?.includes('NETWORK_ERROR')) {
-        errorMessage = "Network error. Please check your internet connection.";
-      }
-      
-      // ✅ ADD: Show error message without redirecting admin
-      alert(errorMessage);
-    } finally {
-      setIsJoinLoading(false);
     }
   };
 
@@ -1079,6 +919,164 @@ export default function LiveClass() {
       intervals.forEach(clearInterval);
     };
   }, []);
+
+  // Start Screen Sharing with loading state and track utilities
+  const startScreenShare = async () => {
+    try {
+      if (!isTeacher) {
+        return;
+      }
+
+      setIsScreenShareLoading(true);
+
+      const screenTrack = await AgoraRTC.createScreenVideoTrack({
+        encoderConfig: "1080p_1",
+      }, "auto");
+
+      if (localTracks.video) {
+        await trackManagement.unpublishTrack(client, localTracks.video);
+      }
+
+      await trackManagement.publishTrack(client, screenTrack);
+      
+      if (Array.isArray(screenTrack)) {
+        screenTrack[0].play("local-player");
+        setScreenShareTrack(screenTrack[0]);
+      } else {
+        screenTrack.play("local-player");
+        setScreenShareTrack(screenTrack);
+      }
+
+      await API.post(`/live/screen-share/start/${sessionId}`);
+      setIsScreenSharing(true);
+      
+      debugLog("Screen sharing started successfully");
+
+    } catch (err) {
+      console.error("Start screen share failed:", err);
+      
+      if (err.message?.includes('PERMISSION_DENIED') || err.name === 'NotAllowedError') {
+        if (localTracks.video) {
+          await trackManagement.publishTrack(client, localTracks.video);
+          localTracks.video.play("local-player");
+        }
+      }
+    } finally {
+      setIsScreenShareLoading(false);
+    }
+  };
+
+  // Stop Screen Sharing with loading state and track utilities
+  const stopScreenShare = async () => {
+    try {
+      setIsScreenShareLoading(true);
+
+      if (screenShareTrack) {
+        await trackManagement.unpublishTrack(client, screenShareTrack);
+        screenShareTrack.close();
+        setScreenShareTrack(null);
+      }
+
+      if (localTracks.video) {
+        await trackManagement.publishTrack(client, localTracks.video);
+        localTracks.video.play("local-player");
+      }
+
+      await API.post(`/live/screen-share/stop/${sessionId}`);
+      setIsScreenSharing(false);
+      
+      debugLog("Screen sharing stopped");
+
+    } catch (err) {
+      console.error("Stop screen share failed:", err);
+    } finally {
+      setIsScreenShareLoading(false);
+    }
+  };
+
+  // Toggle Screen Sharing with loading state
+  const toggleScreenShare = async () => {
+    if (isScreenSharing) {
+      await stopScreenShare();
+    } else {
+      await startScreenShare();
+    }
+  };
+
+  // Toggle Video On/Off with loading state and track utilities
+  const toggleVideo = async () => {
+    if (!localTracks.video || isVideoLoading) return;
+
+    setIsVideoLoading(true);
+    try {
+      const newVideoState = !isVideoOn;
+      trackManagement.enableTrack(localTracks.video, newVideoState);
+      setIsVideoOn(newVideoState);
+    } catch (err) {
+      console.error("Toggle video failed:", err);
+    } finally {
+      setIsVideoLoading(false);
+    }
+  };
+
+  // Recording functions with loading states
+  const startRecording = async () => {
+    try {
+      if (!isTeacher) {
+        return;
+      }
+
+      setIsRecordingLoading(true);
+      const response = await API.post(`/live/recording/start/${sessionId}`);
+      setIsRecording(true);
+      setRecordingStatus(response.data.recording);
+      
+    } catch (err) {
+      console.error("Start recording failed:", err);
+    } finally {
+      setIsRecordingLoading(false);
+    }
+  };
+
+  const stopRecording = async () => {
+    try {
+      if (!isTeacher) {
+        return;
+      }
+
+      setIsRecordingLoading(true);
+      const response = await API.post(`/live/recording/stop/${sessionId}`);
+      setIsRecording(false);
+      setRecordingStatus(response.data.recording);
+      
+    } catch (err) {
+      console.error("Stop recording failed:", err);
+    } finally {
+      setIsRecordingLoading(false);
+    }
+  };
+
+  const toggleRecording = async () => {
+    if (isRecording) {
+      await stopRecording();
+    } else {
+      await startRecording();
+    }
+  };
+
+  // Adjust audio volume for all remote users
+  const adjustRemoteAudioVolume = (volume = 50) => {
+    remoteUsers.forEach(user => {
+      if (user.audioTrack) {
+        user.audioTrack.setVolume(volume);
+      }
+    });
+  };
+
+  // Call this after remote users join
+  useEffect(() => {
+    adjustRemoteAudioVolume(50);
+  }, [remoteUsers]);
 
   if (!sessionId) {
     return (

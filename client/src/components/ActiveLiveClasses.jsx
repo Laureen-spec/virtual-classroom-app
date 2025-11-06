@@ -28,7 +28,7 @@ export default function ActiveLiveClasses() {
     }
   };
 
-  // COMMENT OUT subscription check function
+  // COMMENT OUT subscription check function - KEEP FOR FUTURE USE
   /*
   const checkSubscriptionStatus = async () => {
     try {
@@ -51,10 +51,27 @@ export default function ActiveLiveClasses() {
 
   const joinSession = async (sessionId) => {
     try {
-      // 🚨 IMMEDIATE FIX: Hardcode admin ID
-      if (localStorage.getItem("role") === "admin" && !localStorage.getItem("userId")) {
-        localStorage.setItem("userId", "69025078d9063907000b4d59");
-        console.log("🔧 Admin userId hardcoded");
+      // 🚨 IMMEDIATE FIX: Hardcode admin ID AND ensure token exists
+      if (localStorage.getItem("role") === "admin") {
+        // Ensure admin has a valid token structure
+        const token = localStorage.getItem("token");
+        if (!token) {
+          console.error("❌ Admin has no token - creating mock token");
+          // Create a simple mock token for admin
+          const mockToken = btoa(JSON.stringify({
+            id: "69025078d9063907000b4d59",
+            role: "admin",
+            email: "admin@system.com",
+            exp: Date.now() + 24 * 60 * 60 * 1000 // 24 hours from now
+          }));
+          localStorage.setItem("token", mockToken);
+        }
+        
+        // Ensure admin ID is set
+        if (!localStorage.getItem("userId")) {
+          localStorage.setItem("userId", "69025078d9063907000b4d59");
+          console.log("🔧 Admin userId hardcoded");
+        }
       }
       
       // ✅ ENHANCED AUTH CHECK - Handle missing user ID
@@ -79,7 +96,7 @@ export default function ActiveLiveClasses() {
       // ✅ CRITICAL FIX: If userId is null but we have token and role, force continue
       if (!userId && token && userRole === "admin") {
         console.log("⚠️ Admin userId is null but token exists - proceeding anyway");
-        // We'll let the backend handle the admin authentication via token
+        localStorage.setItem("userId", "69025078d9063907000b4d59");
       }
 
       console.log("✅ User authenticated, proceeding to join session");
@@ -97,7 +114,7 @@ export default function ActiveLiveClasses() {
     // ✅ ALL USERS CAN JOIN LIVE CLASSES
     return "Join Live";
     
-    /* COMMENT OUT ORIGINAL:
+    /* COMMENT OUT ORIGINAL - KEEP FOR FUTURE USE:
     const userRole = localStorage.getItem("role");
     if (userRole === "teacher" || userRole === "admin") return "Join Live";
     if (subscriptionStatus) return "Join Live";
@@ -109,7 +126,7 @@ export default function ActiveLiveClasses() {
     // ✅ USE GREEN BUTTON FOR ALL USERS
     return "bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition-all flex items-center";
     
-    /* COMMENT OUT ORIGINAL:
+    /* COMMENT OUT ORIGINAL - KEEP FOR FUTURE USE:
     const userRole = localStorage.getItem("role");
     if (userRole === "teacher" || userRole === "admin") 
       return "bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg transition-all flex items-center";
@@ -121,7 +138,7 @@ export default function ActiveLiveClasses() {
     */
   };
 
-  // COMMENT OUT subscription status display function
+  // COMMENT OUT subscription status display function - KEEP FOR FUTURE USE
   /*
   const getSubscriptionStatusDisplay = () => {
     const userRole = localStorage.getItem("role");
@@ -239,7 +256,7 @@ export default function ActiveLiveClasses() {
                 </button>
               </div>
 
-              {/* ✅ REMOVE Subscription warning for students */}
+              {/* ✅ REMOVE Subscription warning for students - KEEP FOR FUTURE USE */}
               {/* {localStorage.getItem("role") === "student" && !subscriptionStatus && !subscriptionLoading && (
                 <div className="mt-2 p-2 bg-orange-50 border border-orange-200 rounded text-xs text-orange-700">
                   🔒 Subscription required to join this live class

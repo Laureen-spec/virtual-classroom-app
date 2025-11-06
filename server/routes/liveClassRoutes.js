@@ -149,6 +149,11 @@ router.post("/join/:sessionId", verifyToken, async (req, res) => {
       timestamp: new Date().toISOString()
     });
 
+    // ✅ ADD THIS DEBUG TO SEE IF ADMIN REACHES HERE
+    if (req.user.role === "admin") {
+      console.log("🎯 ADMIN JOIN REACHED BACKEND - Token verification passed!");
+    }
+
     // ✅ CRITICAL FIX: Handle admin with null userId in localStorage
     if (req.user.role === "admin") {
       console.log("🛠️ ADMIN JOIN DETECTED - User ID from token:", req.user.id);
