@@ -51,13 +51,15 @@ export default function ActiveLiveClasses() {
 
   const joinSession = async (sessionId) => {
     try {
-      // ✅ SIMPLIFIED AUTH CHECK - Only check token
+      // ✅ ENHANCED AUTH CHECK - Handle missing user ID
       const token = localStorage.getItem("token");
+      let userId = localStorage.getItem("userId");
+      const userRole = localStorage.getItem("role");
       
-      console.log("🔄 Join session attempt:", {
+      console.log("🔄 Enhanced join session attempt:", {
         sessionId,
-        userRole: localStorage.getItem("role"),
-        userId: localStorage.getItem("userId"),
+        userRole,
+        userId,
         hasToken: !!token
       });
 
@@ -66,6 +68,12 @@ export default function ActiveLiveClasses() {
         alert("Please log in again to join the live class");
         navigate("/register");
         return;
+      }
+
+      // ✅ CRITICAL FIX: If userId is null but we have token and role, force continue
+      if (!userId && token && userRole === "admin") {
+        console.log("⚠️ Admin userId is null but token exists - proceeding anyway");
+        // We'll let the backend handle the admin authentication via token
       }
 
       console.log("✅ User authenticated, proceeding to join session");
