@@ -4,8 +4,8 @@ import cors from "cors";
 import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
-import { createServer } from "http"; // ✅ ADD THIS
-import { Server } from "socket.io"; // ✅ ADD THIS
+import { createServer } from "http";
+import { Server } from "socket.io";
 
 // ✅ Fix for ES module path
 const __filename = fileURLToPath(import.meta.url);
@@ -37,7 +37,7 @@ dotenv.config();
 const app = express();
 
 // ✅ Create HTTP server
-const server = createServer(app); // ✅ ADD THIS
+const server = createServer(app);
 
 // ✅ Socket.io setup
 const io = new Server(server, {
@@ -80,11 +80,14 @@ io.on("connection", (socket) => {
     });
   });
 
-  // ✅ Mute specific student (Teacher only)
+  // ✅ ENHANCED: Mute specific student (Teacher only) - TARGETS SPECIFIC SOCKET ID
   socket.on("mute-student", async (data) => {
     const { sessionId, targetId, teacherId } = data;
     
     try {
+      // Dynamic import to avoid circular dependencies
+      const LiveSession = (await import("./models/LiveSession.js")).default;
+      
       // Verify teacher owns the session
       const liveSession = await LiveSession.findById(sessionId);
       if (!liveSession || liveSession.teacherId.toString() !== teacherId) {
@@ -92,14 +95,37 @@ io.on("connection", (socket) => {
         return;
       }
 
-      // Emit to specific student
-      io.to(sessionId).emit("mute-student", {
-        targetId,
-        teacherId,
-        timestamp: new Date(),
-        message: "You have been muted by the teacher"
+      // Update DB: set participant.isMuted = true and revoke speaking permission
+      const pIndex = liveSession.participants.findIndex(p => p.studentId.toString() === String(targetId));
+      if (pIndex !== -1) {
+        liveSession.participants[pIndex].isMuted = true;
+        liveSession.participants[pIndex].hasSpeakingPermission = false;
+        await liveSession.save();
+      }
+
+      // Find socket id for that user in this session
+      const sessionSockets = activeSessions.get(sessionId);
+      const targetSocketId = sessionSockets ? sessionSockets.get(String(targetId)) : null;
+
+      // Emit direct event to the target if online
+      if (targetSocketId) {
+        io.to(targetSocketId).emit("mute-student", { 
+          targetId, 
+          teacherId, 
+          timestamp: new Date(),
+          message: "You have been muted by the teacher"
+        });
+        console.log(`🔇 Sent mute-student to socket ${targetSocketId} for user ${targetId}`);
+      }
+
+      // Also broadcast updated participant data to the whole room for sync
+      io.in(sessionId).emit("participant-updated", {
+        studentId: targetId,
+        isMuted: true,
+        hasSpeakingPermission: false,
+        timestamp: new Date()
       });
-      
+
       console.log(`🔇 Teacher ${teacherId} muted student ${targetId} in session ${sessionId}`);
       
     } catch (error) {
@@ -108,11 +134,14 @@ io.on("connection", (socket) => {
     }
   });
 
-  // ✅ Unmute specific student (Teacher only)
+  // ✅ ENHANCED: Unmute specific student (Teacher only) - TARGETS SPECIFIC SOCKET ID
   socket.on("unmute-student", async (data) => {
     const { sessionId, targetId, teacherId } = data;
     
     try {
+      // Dynamic import to avoid circular dependencies
+      const LiveSession = (await import("./models/LiveSession.js")).default;
+      
       // Verify teacher owns the session
       const liveSession = await LiveSession.findById(sessionId);
       if (!liveSession || liveSession.teacherId.toString() !== teacherId) {
@@ -120,14 +149,38 @@ io.on("connection", (socket) => {
         return;
       }
 
-      // Emit to specific student
-      io.to(sessionId).emit("unmute-student", {
-        targetId,
-        teacherId,
-        timestamp: new Date(),
-        message: "You have been unmuted by the teacher"
+      // Update DB: set participant.isMuted = false and grant speaking permission
+      const pIndex = liveSession.participants.findIndex(p => p.studentId.toString() === String(targetId));
+      if (pIndex !== -1) {
+        liveSession.participants[pIndex].isMuted = false;
+        liveSession.participants[pIndex].hasSpeakingPermission = true;
+        liveSession.participants[pIndex].permissionRequested = false;
+        await liveSession.save();
+      }
+
+      // Find socket id for that user in this session
+      const sessionSockets = activeSessions.get(sessionId);
+      const targetSocketId = sessionSockets ? sessionSockets.get(String(targetId)) : null;
+
+      // Emit direct event to the target if online
+      if (targetSocketId) {
+        io.to(targetSocketId).emit("unmute-student", { 
+          targetId, 
+          teacherId, 
+          timestamp: new Date(),
+          message: "You have been unmuted by the teacher"
+        });
+        console.log(`🎤 Sent unmute-student to socket ${targetSocketId} for user ${targetId}`);
+      }
+
+      // Also broadcast updated participant data to the whole room for sync
+      io.in(sessionId).emit("participant-updated", {
+        studentId: targetId,
+        isMuted: false,
+        hasSpeakingPermission: true,
+        timestamp: new Date()
       });
-      
+
       console.log(`🎤 Teacher ${teacherId} unmuted student ${targetId} in session ${sessionId}`);
       
     } catch (error) {
@@ -136,11 +189,14 @@ io.on("connection", (socket) => {
     }
   });
 
-  // ✅ Mute all students (Teacher only)
+  // ✅ Mute all students (Teacher only) - PRESERVED ORIGINAL FUNCTIONALITY
   socket.on("mute-all", async (data) => {
     const { sessionId, teacherId } = data;
     
     try {
+      // Dynamic import to avoid circular dependencies
+      const LiveSession = (await import("./models/LiveSession.js")).default;
+      
       // Verify teacher owns the session
       const liveSession = await LiveSession.findById(sessionId);
       if (!liveSession || liveSession.teacherId.toString() !== teacherId) {
@@ -148,14 +204,37 @@ io.on("connection", (socket) => {
         return;
       }
 
+      // Update DB: mute all non-host participants
+      let mutedCount = 0;
+      liveSession.participants.forEach((participant, index) => {
+        if (participant.role !== "host") {
+          liveSession.participants[index].isMuted = true;
+          liveSession.participants[index].hasSpeakingPermission = false;
+          mutedCount++;
+        }
+      });
+      await liveSession.save();
+
       // Emit to all students in session
       io.to(sessionId).emit("mute-all", {
         teacherId,
         timestamp: new Date(),
         message: "All students have been muted"
       });
+
+      // Broadcast participant updates for all muted students
+      liveSession.participants.forEach(participant => {
+        if (participant.role !== "host") {
+          io.in(sessionId).emit("participant-updated", {
+            studentId: participant.studentId,
+            isMuted: true,
+            hasSpeakingPermission: false,
+            timestamp: new Date()
+          });
+        }
+      });
       
-      console.log(`🔇 Teacher ${teacherId} muted all students in session ${sessionId}`);
+      console.log(`🔇 Teacher ${teacherId} muted all students (${mutedCount}) in session ${sessionId}`);
       
     } catch (error) {
       console.error("Error in mute-all:", error);
@@ -163,11 +242,14 @@ io.on("connection", (socket) => {
     }
   });
 
-  // ✅ Unmute all students (Teacher only)
+  // ✅ Unmute all students (Teacher only) - PRESERVED ORIGINAL FUNCTIONALITY
   socket.on("unmute-all", async (data) => {
     const { sessionId, teacherId } = data;
     
     try {
+      // Dynamic import to avoid circular dependencies
+      const LiveSession = (await import("./models/LiveSession.js")).default;
+      
       // Verify teacher owns the session
       const liveSession = await LiveSession.findById(sessionId);
       if (!liveSession || liveSession.teacherId.toString() !== teacherId) {
@@ -175,14 +257,37 @@ io.on("connection", (socket) => {
         return;
       }
 
+      // Update DB: unmute all non-host participants
+      let unmutedCount = 0;
+      liveSession.participants.forEach((participant, index) => {
+        if (participant.role !== "host") {
+          liveSession.participants[index].isMuted = false;
+          liveSession.participants[index].hasSpeakingPermission = true;
+          unmutedCount++;
+        }
+      });
+      await liveSession.save();
+
       // Emit to all students in session
       io.to(sessionId).emit("unmute-all", {
         teacherId,
         timestamp: new Date(),
         message: "All students have been unmuted"
       });
+
+      // Broadcast participant updates for all unmuted students
+      liveSession.participants.forEach(participant => {
+        if (participant.role !== "host") {
+          io.in(sessionId).emit("participant-updated", {
+            studentId: participant.studentId,
+            isMuted: false,
+            hasSpeakingPermission: true,
+            timestamp: new Date()
+          });
+        }
+      });
       
-      console.log(`🎤 Teacher ${teacherId} unmuted all students in session ${sessionId}`);
+      console.log(`🎤 Teacher ${teacherId} unmuted all students (${unmutedCount}) in session ${sessionId}`);
       
     } catch (error) {
       console.error("Error in unmute-all:", error);
