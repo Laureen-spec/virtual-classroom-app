@@ -21,7 +21,7 @@ API.interceptors.request.use((config) => {
   return config;
 });
 
-// ✅ Enhanced response interceptor to handle admin user ID
+// ✅ Enhanced response interceptor to handle admin user ID and 401 errors
 API.interceptors.response.use(
   (response) => {
     // If this is a login response, ensure user ID is stored
@@ -47,6 +47,19 @@ API.interceptors.response.use(
     return response;
   },
   (error) => {
+    // ✅ CRITICAL FIX: Prevent automatic redirect for admin 401 errors
+    if (error.response?.status === 401) {
+      const userRole = localStorage.getItem("role");
+      if (userRole === "admin") {
+        console.log("🔧 Admin 401 error intercepted - preventing auto redirect");
+        // Return a custom error that won't trigger redirect
+        return Promise.reject({
+          ...error,
+          isAdminAuthError: true,
+          message: "Admin authentication issue - please check credentials"
+        });
+      }
+    }
     return Promise.reject(error);
   }
 );
