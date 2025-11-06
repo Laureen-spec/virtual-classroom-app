@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import AgoraRTC from "agora-rtc-sdk-ng";
 import API from "../api/axios";
+import io from "socket.io-client"; // ✅ ADD THIS
 
 export default function LiveClass() {
   const navigate = useNavigate();
@@ -20,6 +21,10 @@ export default function LiveClass() {
   const [participants, setParticipants] = useState([]);
   const [isTeacher, setIsTeacher] = useState(false);
   const [pendingRequests, setPendingRequests] = useState([]);
+
+  // ✅ ADD SOCKET STATE
+  const [socket, setSocket] = useState(null);
+  const [isSocketConnected, setIsSocketConnected] = useState(false);
 
   // Screen sharing state variables
   const [isScreenSharing, setIsScreenSharing] = useState(false);
@@ -130,6 +135,129 @@ export default function LiveClass() {
     
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
+
+  // ✅ ADDED: Socket.io connection setup
+  useEffect(() => {
+    const initializeSocket = () => {
+      const socketUrl = process.env.NODE_ENV === 'production' 
+        ? 'https://your-backend-url.com' 
+        : 'http://localhost:5000';
+      
+      const newSocket = io(socketUrl, {
+        transports: ['websocket', 'polling']
+      });
+
+      newSocket.on('connect', () => {
+        console.log('✅ Socket.io connected:', newSocket.id);
+        setIsSocketConnected(true);
+      });
+
+      newSocket.on('disconnect', () => {
+        console.log('❌ Socket.io disconnected');
+        setIsSocketConnected(false);
+      });
+
+      newSocket.on('connect_error', (error) => {
+        console.error('❌ Socket connection error:', error);
+        setIsSocketConnected(false);
+      });
+
+      setSocket(newSocket);
+
+      return newSocket;
+    };
+
+    const socketInstance = initializeSocket();
+
+    return () => {
+      if (socketInstance) {
+        socketInstance.disconnect();
+      }
+    };
+  }, []);
+
+  // ✅ ADDED: Socket.io event listeners for mute/unmute
+  useEffect(() => {
+    if (!socket) return;
+
+    const userId = localStorage.getItem("userId");
+
+    // Listen for mute events from teacher
+    socket.on("mute-student", (data) => {
+      debugLog("🔇 Received mute-student event:", data);
+      
+      if (data.targetId === userId) {
+        setIsMuted(true);
+        if (localTracks.audio) {
+          localTracks.audio.setEnabled(false);
+          debugLog("🔇 Microphone muted by teacher via Socket.io");
+        }
+      }
+    });
+
+    // Listen for unmute events from teacher
+    socket.on("unmute-student", (data) => {
+      debugLog("🎤 Received unmute-student event:", data);
+      
+      if (data.targetId === userId && hasSpeakingPermission) {
+        setIsMuted(false);
+        if (localTracks.audio) {
+          localTracks.audio.setEnabled(true);
+          debugLog("🎤 Microphone unmuted by teacher via Socket.io");
+        }
+      }
+    });
+
+    // Listen for mute-all events
+    socket.on("mute-all", (data) => {
+      debugLog("🔇 Received mute-all event:", data);
+      
+      if (!isTeacher) { // Only affect students
+        setIsMuted(true);
+        if (localTracks.audio) {
+          localTracks.audio.setEnabled(false);
+          debugLog("🔇 Microphone muted due to teacher's mute-all command");
+        }
+      }
+    });
+
+    // Listen for unmute-all events
+    socket.on("unmute-all", (data) => {
+      debugLog("🎤 Received unmute-all event:", data);
+      
+      if (!isTeacher && hasSpeakingPermission) {
+        setIsMuted(false);
+        if (localTracks.audio) {
+          localTracks.audio.setEnabled(true);
+          debugLog("🎤 Microphone unmuted due to teacher's unmute-all command");
+        }
+      }
+    });
+
+    // Cleanup event listeners
+    return () => {
+      socket.off("mute-student");
+      socket.off("unmute-student");
+      socket.off("mute-all");
+      socket.off("unmute-all");
+    };
+  }, [socket, localTracks, isTeacher, hasSpeakingPermission]);
+
+  // ✅ ADDED: Join socket room when session is joined
+  useEffect(() => {
+    if (socket && isSocketConnected && joined && sessionId) {
+      const userId = localStorage.getItem("userId");
+      const userRole = localStorage.getItem("role");
+      
+      socket.emit("join-session", {
+        sessionId,
+        userId,
+        userRole
+      });
+      
+      debugLog("✅ Joined socket room for session:", sessionId);
+    }
+  }, [socket, isSocketConnected, joined, sessionId]);
 
   // ✅ ENHANCED JOIN FUNCTION: Enhanced join function with comprehensive auth debug
   const joinClass = async () => {
@@ -264,6 +392,20 @@ export default function LiveClass() {
       debugLog("Tracks published successfully");
       
       setJoined(true);
+
+      // ✅ Join socket room after successful join
+      if (socket && isSocketConnected) {
+        const userId = localStorage.getItem("userId");
+        const userRole = localStorage.getItem("role");
+        
+        socket.emit("join-session", {
+          sessionId,
+          userId,
+          userRole
+        });
+        
+        debugLog("✅ Joined socket room after class join");
+      }
 
       // Start polling for session updates
       startSessionPolling();
@@ -565,10 +707,20 @@ export default function LiveClass() {
     }
   };
 
-  // FIXED: Mute student with proper Agora track management - NOW WITH IMMEDIATE EFFECT
+  // ✅ ENHANCED: Mute student with Socket.io integration
   const muteStudent = async (studentId) => {
     try {
       debugLog("🎯 Muting student:", studentId);
+      
+      // ✅ Emit socket event for real-time mute
+      if (socket && isSocketConnected) {
+        socket.emit("mute-student", {
+          sessionId,
+          targetId: studentId,
+          teacherId: localStorage.getItem("userId")
+        });
+      }
+
       const response = await API.put(`/live/mute/${sessionId}/${studentId}`, { mute: true });
 
       if (response.data?.studentId) {
@@ -602,10 +754,20 @@ export default function LiveClass() {
     }
   };
 
-  // FIXED: Unmute student with proper Agora track management - NOW WITH IMMEDIATE EFFECT
+  // ✅ ENHANCED: Unmute student with Socket.io integration
   const unmuteStudent = async (studentId) => {
     try {
       debugLog("🎯 Unmuting student:", studentId);
+      
+      // ✅ Emit socket event for real-time unmute
+      if (socket && isSocketConnected) {
+        socket.emit("unmute-student", {
+          sessionId,
+          targetId: studentId,
+          teacherId: localStorage.getItem("userId")
+        });
+      }
+
       const response = await API.put(`/live/mute/${sessionId}/${studentId}`, { mute: false });
 
       if (response.data?.studentId) {
@@ -639,10 +801,19 @@ export default function LiveClass() {
     }
   };
 
-  // FIXED: Mute all students with immediate effect - NOW WITH PROPER TRACK HANDLING
+  // ✅ ENHANCED: Mute all students with Socket.io integration
   const muteAllStudents = async () => {
     try {
       debugLog("🎯 Muting all students.");
+      
+      // ✅ Emit socket event for real-time mute-all
+      if (socket && isSocketConnected) {
+        socket.emit("mute-all", {
+          sessionId,
+          teacherId: localStorage.getItem("userId")
+        });
+      }
+
       await API.put(`/live/mute-all/${sessionId}`);
 
       const sessionResponse = await API.get(`/live/session/${sessionId}`);
@@ -668,10 +839,19 @@ export default function LiveClass() {
     }
   };
 
-  // FIXED: Unmute all students with immediate effect
+  // ✅ ENHANCED: Unmute all students with Socket.io integration
   const unmuteAllStudents = async () => {
     try {
       debugLog("Unmuting all students.");
+      
+      // ✅ Emit socket event for real-time unmute-all
+      if (socket && isSocketConnected) {
+        socket.emit("unmute-all", {
+          sessionId,
+          teacherId: localStorage.getItem("userId")
+        });
+      }
+
       const response = await API.put(`/live/unmute-all/${sessionId}`);
 
       const sessionResponse = await API.get(`/live/session/${sessionId}`);
@@ -922,6 +1102,11 @@ export default function LiveClass() {
         await stopScreenShare();
       }
       
+      // ✅ Disconnect socket when leaving class
+      if (socket) {
+        socket.disconnect();
+      }
+      
       localTracks.audio?.close();
       localTracks.video?.close();
       await client.leave();
@@ -945,6 +1130,11 @@ export default function LiveClass() {
     return () => {
       if (screenShareTrack) {
         screenShareTrack.close();
+      }
+      
+      // ✅ Cleanup socket on component unmount
+      if (socket) {
+        socket.disconnect();
       }
       
       localTracks.audio?.close();
@@ -1126,6 +1316,17 @@ export default function LiveClass() {
 
   return (
     <div className="min-h-screen bg-gray-900 text-white">
+      {/* ✅ ADD Socket Connection Status Indicator */}
+      {isDevelopment && (
+        <div className="fixed top-2 right-2 z-50">
+          <div className={`px-3 py-1 rounded-full text-xs font-semibold ${
+            isSocketConnected ? 'bg-green-600 text-white' : 'bg-red-600 text-white'
+          }`}>
+            Socket: {isSocketConnected ? '🟢 Connected' : '🔴 Disconnected'}
+          </div>
+        </div>
+      )}
+
       {/* Timeout Warning Modal */}
       {showTimeoutWarning && (
         <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50">
@@ -1367,6 +1568,7 @@ export default function LiveClass() {
                 <div>Joined: {joined ? "✅ YES" : "❌ NO"}</div>
                 <div>Remote Users: {remoteUsers.length}</div>
                 <div>Has Speaking Permission: {hasSpeakingPermission ? "✅ YES" : "❌ NO"}</div>
+                <div>Socket Connected: {isSocketConnected ? "✅ YES" : "❌ NO"}</div>
               </div>
             </div>
           )}

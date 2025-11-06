@@ -4,6 +4,8 @@ import cors from "cors";
 import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
+import { createServer } from "http"; // ✅ ADD THIS
+import { Server } from "socket.io"; // ✅ ADD THIS
 
 // ✅ Fix for ES module path
 const __filename = fileURLToPath(import.meta.url);
@@ -31,24 +33,207 @@ import creditRoutes from "./routes/creditRoutes.js";
 
 import "./config/emailConfig.js";
 
-
 dotenv.config();
 const app = express();
+
+// ✅ Create HTTP server
+const server = createServer(app); // ✅ ADD THIS
+
+// ✅ Socket.io setup
+const io = new Server(server, {
+  cors: {
+    origin: "https://virtual-classroom-app-three.vercel.app",
+    methods: ["GET", "POST"],
+    credentials: true,
+  },
+});
+
+// ✅ Store active sessions and their sockets
+const activeSessions = new Map();
+
+// ✅ Socket.io connection handling
+io.on("connection", (socket) => {
+  console.log(`🔌 New socket connected: ${socket.id}`);
+
+  // Join a live session room
+  socket.on("join-session", (data) => {
+    const { sessionId, userId, userRole } = data;
+    
+    socket.join(sessionId);
+    socket.sessionId = sessionId;
+    socket.userId = userId;
+    
+    // Store socket in active sessions
+    if (!activeSessions.has(sessionId)) {
+      activeSessions.set(sessionId, new Map());
+    }
+    activeSessions.get(sessionId).set(userId, socket.id);
+    
+    console.log(`🎯 User ${userId} (${userRole}) joined session ${sessionId}`);
+    
+    // Notify others in the session
+    socket.to(sessionId).emit("user-joined", {
+      userId,
+      userRole,
+      socketId: socket.id,
+      timestamp: new Date()
+    });
+  });
+
+  // ✅ Mute specific student (Teacher only)
+  socket.on("mute-student", async (data) => {
+    const { sessionId, targetId, teacherId } = data;
+    
+    try {
+      // Verify teacher owns the session
+      const liveSession = await LiveSession.findById(sessionId);
+      if (!liveSession || liveSession.teacherId.toString() !== teacherId) {
+        socket.emit("error", { message: "Unauthorized to mute students" });
+        return;
+      }
+
+      // Emit to specific student
+      io.to(sessionId).emit("mute-student", {
+        targetId,
+        teacherId,
+        timestamp: new Date(),
+        message: "You have been muted by the teacher"
+      });
+      
+      console.log(`🔇 Teacher ${teacherId} muted student ${targetId} in session ${sessionId}`);
+      
+    } catch (error) {
+      console.error("Error in mute-student:", error);
+      socket.emit("error", { message: "Failed to mute student" });
+    }
+  });
+
+  // ✅ Unmute specific student (Teacher only)
+  socket.on("unmute-student", async (data) => {
+    const { sessionId, targetId, teacherId } = data;
+    
+    try {
+      // Verify teacher owns the session
+      const liveSession = await LiveSession.findById(sessionId);
+      if (!liveSession || liveSession.teacherId.toString() !== teacherId) {
+        socket.emit("error", { message: "Unauthorized to unmute students" });
+        return;
+      }
+
+      // Emit to specific student
+      io.to(sessionId).emit("unmute-student", {
+        targetId,
+        teacherId,
+        timestamp: new Date(),
+        message: "You have been unmuted by the teacher"
+      });
+      
+      console.log(`🎤 Teacher ${teacherId} unmuted student ${targetId} in session ${sessionId}`);
+      
+    } catch (error) {
+      console.error("Error in unmute-student:", error);
+      socket.emit("error", { message: "Failed to unmute student" });
+    }
+  });
+
+  // ✅ Mute all students (Teacher only)
+  socket.on("mute-all", async (data) => {
+    const { sessionId, teacherId } = data;
+    
+    try {
+      // Verify teacher owns the session
+      const liveSession = await LiveSession.findById(sessionId);
+      if (!liveSession || liveSession.teacherId.toString() !== teacherId) {
+        socket.emit("error", { message: "Unauthorized to mute all students" });
+        return;
+      }
+
+      // Emit to all students in session
+      io.to(sessionId).emit("mute-all", {
+        teacherId,
+        timestamp: new Date(),
+        message: "All students have been muted"
+      });
+      
+      console.log(`🔇 Teacher ${teacherId} muted all students in session ${sessionId}`);
+      
+    } catch (error) {
+      console.error("Error in mute-all:", error);
+      socket.emit("error", { message: "Failed to mute all students" });
+    }
+  });
+
+  // ✅ Unmute all students (Teacher only)
+  socket.on("unmute-all", async (data) => {
+    const { sessionId, teacherId } = data;
+    
+    try {
+      // Verify teacher owns the session
+      const liveSession = await LiveSession.findById(sessionId);
+      if (!liveSession || liveSession.teacherId.toString() !== teacherId) {
+        socket.emit("error", { message: "Unauthorized to unmute all students" });
+        return;
+      }
+
+      // Emit to all students in session
+      io.to(sessionId).emit("unmute-all", {
+        teacherId,
+        timestamp: new Date(),
+        message: "All students have been unmuted"
+      });
+      
+      console.log(`🎤 Teacher ${teacherId} unmuted all students in session ${sessionId}`);
+      
+    } catch (error) {
+      console.error("Error in unmute-all:", error);
+      socket.emit("error", { message: "Failed to unmute all students" });
+    }
+  });
+
+  // Handle disconnection
+  socket.on("disconnect", () => {
+    console.log(`🔌 Socket disconnected: ${socket.id}`);
+    
+    if (socket.sessionId && socket.userId) {
+      const sessionSockets = activeSessions.get(socket.sessionId);
+      if (sessionSockets) {
+        sessionSockets.delete(socket.userId);
+        if (sessionSockets.size === 0) {
+          activeSessions.delete(socket.sessionId);
+        }
+      }
+      
+      // Notify others in the session
+      socket.to(socket.sessionId).emit("user-left", {
+        userId: socket.userId,
+        socketId: socket.id,
+        timestamp: new Date()
+      });
+    }
+  });
+
+  // Error handling
+  socket.on("error", (error) => {
+    console.error("Socket error:", error);
+  });
+});
+
+// ✅ Make io available to routes
+app.set("io", io);
 
 // ✅ Middlewares (always before routes)
 app.use(
   cors({
-    origin: "https://virtual-classroom-app-three.vercel.app", // your frontend URL
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"], // allowed HTTP methods
-    credentials: true, // allow sending cookies or auth headers
-    allowedHeaders: ["Content-Type", "Authorization"], // headers allowed
+    origin: "https://virtual-classroom-app-three.vercel.app",
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    credentials: true,
+    allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
 
 app.use(express.json());
 
 // ✅ Static folder to serve uploaded files
-// (This allows student & teacher to access materials in /uploads)
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 // ✅ Routes
@@ -68,6 +253,7 @@ app.use("/api/timetable", timetableRoutes);
 app.use("/api/live", liveClassRoutes);
 app.use("/api/admin/payments", paymentAdminRoutes);
 app.use("/api/credits", creditRoutes);
+
 // ✅ Default route
 app.get("/", (req, res) => {
   res.send("Virtual Classroom Backend is running...");
@@ -79,6 +265,6 @@ mongoose
   .then(() => console.log("✅ MongoDB Connected Successfully"))
   .catch((err) => console.log("❌ MongoDB Connection Error:", err));
 
-// ✅ Server port
+// ✅ Server port - CHANGE from app.listen to server.listen
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+server.listen(PORT, () => console.log(`🚀 Server running on port ${PORT} with Socket.io`));
