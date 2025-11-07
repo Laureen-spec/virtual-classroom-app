@@ -83,6 +83,16 @@ export default function LiveClass() {
     });
   }, [sessionId]);
 
+  // ✅ ADD: Debug mute state changes
+  useEffect(() => {
+    console.log("🎧 MUTE STATE CHANGED:", {
+      isMuted,
+      hasAudioTrack: !!localTracksRef.current?.audio,
+      audioEnabled: localTracksRef.current?.audio?.enabled,
+      userRole: localStorage.getItem("role")
+    });
+  }, [isMuted]);
+
   // Simple track management utilities (from your working code)
   const trackManagement = {
     publishTrack: async (client, track) => {
@@ -175,13 +185,13 @@ export default function LiveClass() {
     };
   }, []);
 
-  // ✅ UPDATED: Enhanced Socket.io event listeners for mute/unmute with track publishing/unpublishing
+  // ✅ UPDATED: Enhanced Socket.io event listeners for consistent mute/unmute
   useEffect(() => {
     if (!socket) return;
 
     const userId = localStorage.getItem("userId");
 
-    // ✅ UPDATED: Mute student handler - only update UI, don't block physical mute
+    // ✅ CONSISTENT: Mute student handler - disable and unpublish audio
     socket.on("mute-student", async (data) => {
       debugLog("🔇 Received mute-student event:", data);
       
@@ -189,7 +199,7 @@ export default function LiveClass() {
       if (data.targetId === userId) {
         setIsMuted(true);
 
-        // ✅ PHYSICALLY TURN OFF MICROPHONE AND UNPUBLISH - Using localTracksRef
+        // ✅ CONSISTENT: PHYSICALLY DISABLE AND UNPUBLISH AUDIO
         if (localTracksRef.current.audio) {
           await localTracksRef.current.audio.setEnabled(false);
           await trackManagement.unpublishTrack(client, localTracksRef.current.audio);
@@ -198,7 +208,7 @@ export default function LiveClass() {
       }
     });
 
-    // ✅ UPDATED: Unmute student handler - only update UI
+    // ✅ CONSISTENT: Unmute student handler - enable and publish audio
     socket.on("unmute-student", async (data) => {
       debugLog("🎤 Received unmute-student event:", data);
       
@@ -206,35 +216,16 @@ export default function LiveClass() {
       if (data.targetId === userId) {
         setIsMuted(false);
 
+        // ✅ CONSISTENT: PHYSICALLY ENABLE AND PUBLISH AUDIO
         if (localTracksRef.current.audio) {
-          // ✅ Re-enable existing track and republish
           await localTracksRef.current.audio.setEnabled(true);
           await trackManagement.publishTrack(client, localTracksRef.current.audio);
-          console.log("🎤 Microphone re-enabled and republished after teacher unmute (SOCKET)");
-        } else {
-          // ✅ Safety: recreate and publish the track again if missing
-          try {
-            const [newAudioTrack] = await AgoraRTC.createMicrophoneAudioTrack({
-              AEC: true,
-              ANS: true, 
-              AGC: true,
-              encoderConfig: {
-                sampleRate: 48000,
-                stereo: false,
-                bitrate: 64
-              }
-            });
-            localTracksRef.current.audio = newAudioTrack;
-            await trackManagement.publishTrack(client, newAudioTrack);
-            console.log("🎤 New audio track created and published after unmute");
-          } catch (error) {
-            console.error("❌ Failed to create new audio track:", error);
-          }
+          console.log("🎤 Microphone enabled and published after teacher unmute (SOCKET)");
         }
       }
     });
 
-    // ✅ UPDATED: Mute-all - only update UI state
+    // ✅ CONSISTENT: Mute-all - disable and unpublish audio
     socket.on("mute-all", async (data) => {
       debugLog("🔇 Received mute-all event:", data);
       
@@ -248,7 +239,7 @@ export default function LiveClass() {
       }
     });
 
-    // ✅ UPDATED: Unmute-all - only update UI state
+    // ✅ CONSISTENT: Unmute-all - enable and publish audio
     socket.on("unmute-all", async (data) => {
       debugLog("🎤 Received unmute-all event:", data);
       
@@ -287,7 +278,7 @@ export default function LiveClass() {
     }
   }, [socket, isSocketConnected, joined, sessionId]);
 
-  // ✅ UPDATED: Enhanced toggle mute function - STUDENTS CAN ALWAYS MUTE/UNMUTE
+  // ✅ UPDATED: Enhanced toggle mute function - STUDENTS CAN ALWAYS MUTE/UNMUTE (FIXED)
   const toggleMute = async () => {
     if (isMuteLoading) return;
     
@@ -300,25 +291,30 @@ export default function LiveClass() {
     setIsMuteLoading(true);
     try {
       if (isMuted) {
-        // ✅ ALLOW STUDENTS TO UNMUTE THEMSELVES WITHOUT PERMISSION
+        // ✅ UNMUTE: Enable audio track and publish
         debugLog("🎤 Unmuting...");
         await API.put(`/live/self-unmute/${sessionId}`);
+        
+        // ✅ PHYSICALLY ENABLE AUDIO TRACK
         trackManagement.enableTrack(audio, true);
         setIsMuted(false);
         
-        // Republish audio track
+        // ✅ REPUBLISH AUDIO TRACK
         await trackManagement.publishTrack(client, audio).catch(()=>{});
-        debugLog("✅ Successfully unmuted");
+        debugLog("✅ Successfully unmuted - audio track enabled and published");
+        
       } else {
-        // ✅ ALLOW STUDENTS TO MUTE THEMSELVES
+        // ✅ MUTE: Disable audio track and unpublish  
         debugLog("🔇 Muting...");
         await API.put(`/live/self-mute/${sessionId}`);
+        
+        // ✅ PHYSICALLY DISABLE AUDIO TRACK
         trackManagement.enableTrack(audio, false);
         setIsMuted(true);
         
-        // Unpublish audio track
+        // ✅ UNPUBLISH AUDIO TRACK
         await trackManagement.unpublishTrack(client, audio).catch(()=>{});
-        debugLog("✅ Successfully muted");
+        debugLog("✅ Successfully muted - audio track disabled and unpublished");
       }
     } catch (err) {
       console.error("❌ Toggle mute failed:", err);
@@ -354,13 +350,19 @@ export default function LiveClass() {
       if (!token) {
         if (localStorage.getItem("role") === "admin") {
           console.log("🛠️ Admin has no token in LiveClass - creating mock token");
-          token = btoa(JSON.stringify({
+          const mockToken = btoa(JSON.stringify({
             id: "69025078d9063907000b4d59",
             role: "admin",
             email: "admin@school.com",
             exp: Date.now() + 24 * 60 * 60 * 1000
           }));
-          localStorage.setItem("token", token);
+          localStorage.setItem("token", mockToken);
+          localStorage.setItem("userId", "69025078d9063907000b4d59");
+          localStorage.setItem("userName", "School Admin");
+          console.log("✅ Mock admin credentials created - retrying join...");
+          // Retry the join
+          setTimeout(() => joinClass(), 1000);
+          return;
         } else {
           console.error("❌ No authentication token found - redirecting to login");
           navigate("/register");
@@ -449,12 +451,17 @@ export default function LiveClass() {
       // ✅ UPDATED: Check if teacher's session requires auto-mute for students
       const sessionData = sessionResponse?.data ?? session ?? {};
       if (sessionData?.settings?.autoMuteNewStudents && !isUserTeacher) {
-        await audioTrack.setEnabled(false); // ✅ start muted
+        // ✅ STUDENTS: Start with audio DISABLED and UNPUBLISHED
+        await audioTrack.setEnabled(false); // Physically disable audio
+        await trackManagement.unpublishTrack(client, audioTrack).catch(()=>{}); // Unpublish initially
         setIsMuted(true);
-        console.log("🔇 Student joined muted by default (autoMuteNewStudents setting)");
+        console.log("🔇 Student joined muted by default - audio disabled and unpublished");
       } else {
+        // ✅ TEACHERS/ADMINS: Start with audio ENABLED and PUBLISHED
         await audioTrack.setEnabled(true);
+        await trackManagement.publishTrack(client, audioTrack).catch(()=>{});
         setIsMuted(false);
+        console.log("🎤 Teacher/Admin joined unmuted - audio enabled and published");
       }
 
       // ✅ FIX 1: Start polling only after local tracks exist

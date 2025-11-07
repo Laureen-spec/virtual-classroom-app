@@ -133,7 +133,7 @@ router.get("/teacher-session/:classId", verifyToken, async (req, res) => {
   }
 });
 
-// 🔹 Join a live class (Student/Teacher/Admin) - UPDATED: Remove speaking permission requirement
+// 🔹 Join a live class (Student/Teacher/Admin) - FIXED: Ensure proper initial audio state
 router.post("/join/:sessionId", verifyToken, async (req, res) => {
   try {
     const { sessionId } = req.params;
@@ -215,7 +215,7 @@ router.post("/join/:sessionId", verifyToken, async (req, res) => {
     let role = RtcRole.SUBSCRIBER;
     let isMuted = liveSession.settings.autoMuteNewStudents;
 
-    // ✅ IMPROVED ADMIN ROLE HANDLING
+    // ✅ FIXED: PROPER INITIAL STATE HANDLING
     if (req.user.role === "admin") {
       role = RtcRole.PUBLISHER;
       isMuted = false;
@@ -242,9 +242,9 @@ router.post("/join/:sessionId", verifyToken, async (req, res) => {
         });
       }
     } else {
-      // ✅ UPDATED: Students join muted but CAN SELF-UNMUTE WITHOUT PERMISSION
-      isMuted = true;
-      console.log("🎓 Student joining muted but can self-unmute");
+      // ✅ CRITICAL FIX: Students join muted but CAN SELF-UNMUTE WITHOUT PERMISSION
+      isMuted = true; // Students always join muted
+      console.log("🎓 Student joining muted but can self-unmute freely");
     }
 
     // Add user to participants if not already added
@@ -266,7 +266,7 @@ router.post("/join/:sessionId", verifyToken, async (req, res) => {
       });
     } else {
       existingParticipant.lastJoinTime = new Date();
-      // ✅ UPDATED: Admin role update without permission
+      // ✅ FIXED: Admin role update without permission
       if (req.user.role === "admin") {
         existingParticipant.role = "host";
         existingParticipant.isMuted = false;
@@ -313,7 +313,8 @@ router.post("/join/:sessionId", verifyToken, async (req, res) => {
     console.log("📤 Sending join response:", {
       userId: req.user.id,
       userRole: req.user.role,
-      isHost: responseData.session.isHost
+      isHost: responseData.session.isHost,
+      isMuted: responseData.participantInfo.isMuted
     });
 
     res.json(responseData);
