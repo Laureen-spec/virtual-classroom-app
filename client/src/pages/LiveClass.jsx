@@ -63,6 +63,9 @@ export default function LiveClass() {
   const client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
   const chatContainerRef = useRef(null);
 
+  // ✅ ADD: useRef for local tracks to avoid stale closures
+  const localTracksRef = useRef({ audio: null, video: null });
+
   // Production mode check and conditional logging
   const isDevelopment = process.env.NODE_ENV === 'development';
   
@@ -189,9 +192,9 @@ export default function LiveClass() {
         setIsMuted(true);
         setHasSpeakingPermission(false);
 
-        // ✅ PHYSICALLY TURN OFF MICROPHONE
-        if (localTracks.audio) {
-          localTracks.audio.setEnabled(false);
+        // ✅ PHYSICALLY TURN OFF MICROPHONE - Using localTracksRef
+        if (localTracksRef.current.audio) {
+          localTracksRef.current.audio.setEnabled(false);
           console.log("🎤 Microphone disabled due to teacher mute");
         }
       }
@@ -206,9 +209,9 @@ export default function LiveClass() {
         setIsMuted(false);
         setHasSpeakingPermission(true);
 
-        // ✅ PHYSICALLY TURN MICROPHONE BACK ON
-        if (localTracks.audio) {
-          localTracks.audio.setEnabled(true);
+        // ✅ PHYSICALLY TURN MICROPHONE BACK ON - Using localTracksRef
+        if (localTracksRef.current.audio) {
+          localTracksRef.current.audio.setEnabled(true);
           console.log("🎤 Microphone re-enabled due to teacher unmute");
         }
       }
@@ -220,8 +223,8 @@ export default function LiveClass() {
       
       if (!isTeacher) { // Only affect students
         setIsMuted(true);
-        if (localTracks.audio) {
-          localTracks.audio.setEnabled(false);
+        if (localTracksRef.current.audio) {
+          localTracksRef.current.audio.setEnabled(false);
           debugLog("🔇 Microphone muted due to teacher's mute-all command");
         }
       }
@@ -233,8 +236,8 @@ export default function LiveClass() {
       
       if (!isTeacher && hasSpeakingPermission) {
         setIsMuted(false);
-        if (localTracks.audio) {
-          localTracks.audio.setEnabled(true);
+        if (localTracksRef.current.audio) {
+          localTracksRef.current.audio.setEnabled(true);
           debugLog("🎤 Microphone unmuted due to teacher's unmute-all command");
         }
       }
@@ -260,7 +263,7 @@ export default function LiveClass() {
       socket.off("unmute-all");
       socket.off("participant-updated");
     };
-  }, [socket, localTracks, isTeacher, hasSpeakingPermission]);
+  }, [socket, isTeacher, hasSpeakingPermission]);
 
   // ✅ ADDED: Join socket room when session is joined
   useEffect(() => {
@@ -385,8 +388,9 @@ export default function LiveClass() {
       
       debugLog("Tracks created");
 
-      // ✅ EXACT REPLACEMENT: New track setup with mute state BEFORE publishing
-      setLocalTracks({ audio: audioTrack, video: videoTrack });
+      // ✅ UPDATED: Set both ref and state for tracks
+      localTracksRef.current = { audio: audioTrack, video: videoTrack }; // ✅ IMPORTANT
+      setLocalTracks({ audio: audioTrack, video: videoTrack });          // UI usage  
       videoTrack.play("local-player");
 
       // ✅ Safely determine participant mute state BEFORE publishing
@@ -633,12 +637,12 @@ export default function LiveClass() {
   // Function to handle audio track updates when permission is granted
   const forceAudioUpdate = async () => {
     try {
-      if (localTracks.audio && hasSpeakingPermission) {
+      if (localTracksRef.current.audio && hasSpeakingPermission) {
         debugLog("🎯 Republishing audio track after permission grant");
         
-        await trackManagement.unpublishTrack(client, localTracks.audio);
-        trackManagement.enableTrack(localTracks.audio, true);
-        await trackManagement.publishTrack(client, localTracks.audio);
+        await trackManagement.unpublishTrack(client, localTracksRef.current.audio);
+        trackManagement.enableTrack(localTracksRef.current.audio, true);
+        await trackManagement.publishTrack(client, localTracksRef.current.audio);
         
         debugLog("✅ Audio track republished successfully after permission grant");
       }
@@ -654,7 +658,7 @@ export default function LiveClass() {
 
   // ORIGINAL WORKING AUDIO: Enhanced toggle mute function with loading state and track utilities
   const toggleMute = async () => {
-    if (!localTracks.audio || isMuteLoading) return;
+    if (!localTracksRef.current.audio || isMuteLoading) return;
 
     setIsMuteLoading(true);
     try {
@@ -668,7 +672,7 @@ export default function LiveClass() {
           } catch (e) {
             debugLog("Warning: backend self-unmute failed:", e?.message || e);
           }
-          trackManagement.enableTrack(localTracks.audio, true);
+          trackManagement.enableTrack(localTracksRef.current.audio, true);
           setIsMuted(false);
           return;
         }
@@ -680,7 +684,7 @@ export default function LiveClass() {
         } else {
           debugLog("🎤 Unmuting with permission.");
           await API.put(`/live/self-unmute/${sessionId}`);
-          trackManagement.enableTrack(localTracks.audio, true);
+          trackManagement.enableTrack(localTracksRef.current.audio, true);
           setIsMuted(false);
           debugLog("✅ Successfully unmuted");
         }
@@ -688,7 +692,7 @@ export default function LiveClass() {
         // Muting is always allowed
         debugLog("🔇 Muting...");
         await API.put(`/live/self-mute/${sessionId}`);
-        trackManagement.enableTrack(localTracks.audio, false);
+        trackManagement.enableTrack(localTracksRef.current.audio, false);
         setIsMuted(true);
         debugLog("✅ Successfully muted");
       }
@@ -741,11 +745,11 @@ export default function LiveClass() {
       if (studentId === currentUserId) {
         setHasSpeakingPermission(true);
         setIsMuted(false);
-        if (localTracks.audio) {
-          trackManagement.enableTrack(localTracks.audio, true);
+        if (localTracksRef.current.audio) {
+          trackManagement.enableTrack(localTracksRef.current.audio, true);
           try {
-            await trackManagement.unpublishTrack(client, localTracks.audio);
-            await trackManagement.publishTrack(client, localTracks.audio);
+            await trackManagement.unpublishTrack(client, localTracksRef.current.audio);
+            await trackManagement.publishTrack(client, localTracksRef.current.audio);
             debugLog("✅ Audio republished after permission grant (local user)");
           } catch (err) {
             console.error("Error republishing after grant:", err);
@@ -980,12 +984,12 @@ export default function LiveClass() {
               debugLog(`🎯 Mute state changed via polling: ${isMuted} -> ${currentParticipant.isMuted}`);
               setIsMuted(currentParticipant.isMuted);
               
-              if (localTracks.audio) {
+              if (localTracksRef.current.audio) {
                 if (currentParticipant.isMuted) {
-                  trackManagement.enableTrack(localTracks.audio, false);
+                  trackManagement.enableTrack(localTracksRef.current.audio, false);
                   debugLog("🎯 Audio disabled (muted via polling)");
                 } else {
-                  trackManagement.enableTrack(localTracks.audio, true);
+                  trackManagement.enableTrack(localTracksRef.current.audio, true);
                   debugLog("🎯 Audio enabled (unmuted via polling)");
                 }
               }
@@ -1094,8 +1098,8 @@ export default function LiveClass() {
         socket.disconnect();
       }
       
-      localTracks.audio?.close();
-      localTracks.video?.close();
+      localTracksRef.current.audio?.close();
+      localTracksRef.current.video?.close();
       await client.leave();
       await API.put(`/live/leave/${sessionId}`);
       setJoined(false);
@@ -1124,8 +1128,8 @@ export default function LiveClass() {
         socket.disconnect();
       }
       
-      localTracks.audio?.close();
-      localTracks.video?.close();
+      localTracksRef.current.audio?.close();
+      localTracksRef.current.video?.close();
       client.leave();
       const intervals = window.liveClassIntervals || [];
       intervals.forEach(clearInterval);
@@ -1145,8 +1149,8 @@ export default function LiveClass() {
         encoderConfig: "1080p_1",
       }, "auto");
 
-      if (localTracks.video) {
-        await trackManagement.unpublishTrack(client, localTracks.video);
+      if (localTracksRef.current.video) {
+        await trackManagement.unpublishTrack(client, localTracksRef.current.video);
       }
 
       await trackManagement.publishTrack(client, screenTrack);
@@ -1168,9 +1172,9 @@ export default function LiveClass() {
       console.error("Start screen share failed:", err);
       
       if (err.message?.includes('PERMISSION_DENIED') || err.name === 'NotAllowedError') {
-        if (localTracks.video) {
-          await trackManagement.publishTrack(client, localTracks.video);
-          localTracks.video.play("local-player");
+        if (localTracksRef.current.video) {
+          await trackManagement.publishTrack(client, localTracksRef.current.video);
+          localTracksRef.current.video.play("local-player");
         }
       }
     } finally {
@@ -1189,9 +1193,9 @@ export default function LiveClass() {
         setScreenShareTrack(null);
       }
 
-      if (localTracks.video) {
-        await trackManagement.publishTrack(client, localTracks.video);
-        localTracks.video.play("local-player");
+      if (localTracksRef.current.video) {
+        await trackManagement.publishTrack(client, localTracksRef.current.video);
+        localTracksRef.current.video.play("local-player");
       }
 
       await API.post(`/live/screen-share/stop/${sessionId}`);
@@ -1217,12 +1221,12 @@ export default function LiveClass() {
 
   // Toggle Video On/Off with loading state and track utilities
   const toggleVideo = async () => {
-    if (!localTracks.video || isVideoLoading) return;
+    if (!localTracksRef.current.video || isVideoLoading) return;
 
     setIsVideoLoading(true);
     try {
       const newVideoState = !isVideoOn;
-      trackManagement.enableTrack(localTracks.video, newVideoState);
+      trackManagement.enableTrack(localTracksRef.current.video, newVideoState);
       setIsVideoOn(newVideoState);
     } catch (err) {
       console.error("Toggle video failed:", err);
