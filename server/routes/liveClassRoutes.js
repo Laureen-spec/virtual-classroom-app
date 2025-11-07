@@ -248,7 +248,10 @@ router.post("/join/:sessionId", verifyToken, async (req, res) => {
         });
       }
     } else {
-      console.log("🎓 Student joining with subscriber role");
+      // ✅ CRITICAL FIX: Students join muted with no speaking permission
+      isMuted = true;
+      hasSpeakingPermission = false;
+      console.log("🎓 Student joining muted with no speaking permission");
     }
 
     // Add user to participants if not already added
@@ -726,6 +729,9 @@ router.put("/mute/:sessionId/:studentId", verifyToken, async (req, res) => {
     if (participantIndex === -1) {
       return res.status(404).json({ message: "Student not found in this session" });
     }
+
+    // ✅ CRITICAL FIX: REMOVED speaking permission check for teacher mute/unmute
+    // Teacher can mute/unmute any student regardless of speaking permission
 
     // CRITICAL: Update mute status
     liveSession.participants[participantIndex].isMuted = mute;

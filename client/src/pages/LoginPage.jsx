@@ -20,13 +20,23 @@ function LoginPage() {
     try {
       const res = await API.post("/auth/login", formData);
 
-      // Store token + role
+      // ✅ Decode token → store user object
+      const token = res.data.token;
+      const payload = JSON.parse(atob(token.split(".")[1]));
+      const user = {
+        _id: payload.id,
+        role: payload.role,
+        name: payload.name,
+      };
+
+      // 🔹 Store token and user data
       localStorage.setItem("token", res.data.token);
-      localStorage.setItem("role", res.data.role);
+      localStorage.setItem("role", user.role);
+      localStorage.setItem("user", JSON.stringify(user));
 
       // 🔹 Redirect based on role
-      if (res.data.role === "admin") navigate("/admin");
-      else if (res.data.role === "teacher") navigate("/teacher");
+      if (user.role === "admin") navigate("/admin");
+      else if (user.role === "teacher") navigate("/teacher");
       else navigate("/student");
     } catch (err) {
       setError(err.response?.data?.message || "Login failed. Check credentials.");

@@ -656,9 +656,15 @@ export default function LiveClass() {
     debugLog("🎧 Audio state:", { isMuted, hasSpeakingPermission });
   }, [isMuted, hasSpeakingPermission]);
 
-  // ORIGINAL WORKING AUDIO: Enhanced toggle mute function with loading state and track utilities
+  // ✅ UPDATED: Enhanced toggle mute function with robust track management
   const toggleMute = async () => {
-    if (!localTracksRef.current.audio || isMuteLoading) return;
+    if (isMuteLoading) return;
+    
+    const audio = localTracksRef.current?.audio;
+    if (!audio) {
+      console.warn("toggleMute: no audio track");
+      return;
+    }
 
     setIsMuteLoading(true);
     try {
@@ -672,8 +678,11 @@ export default function LiveClass() {
           } catch (e) {
             debugLog("Warning: backend self-unmute failed:", e?.message || e);
           }
-          trackManagement.enableTrack(localTracksRef.current.audio, true);
+          trackManagement.enableTrack(audio, true);
           setIsMuted(false);
+          
+          // Republish audio track
+          await trackManagement.publishTrack(client, audio).catch(()=>{});
           return;
         }
 
@@ -684,16 +693,22 @@ export default function LiveClass() {
         } else {
           debugLog("🎤 Unmuting with permission.");
           await API.put(`/live/self-unmute/${sessionId}`);
-          trackManagement.enableTrack(localTracksRef.current.audio, true);
+          trackManagement.enableTrack(audio, true);
           setIsMuted(false);
+          
+          // Republish audio track
+          await trackManagement.publishTrack(client, audio).catch(()=>{});
           debugLog("✅ Successfully unmuted");
         }
       } else {
         // Muting is always allowed
         debugLog("🔇 Muting...");
         await API.put(`/live/self-mute/${sessionId}`);
-        trackManagement.enableTrack(localTracksRef.current.audio, false);
+        trackManagement.enableTrack(audio, false);
         setIsMuted(true);
+        
+        // Unpublish audio track
+        await trackManagement.unpublishTrack(client, audio).catch(()=>{});
         debugLog("✅ Successfully muted");
       }
     } catch (err) {
@@ -1086,7 +1101,7 @@ export default function LiveClass() {
     }
   };
 
-  // Leave class
+  // ✅ UPDATED: Leave class - robust cleanup
   const leaveClass = async () => {
     try {
       if (isScreenSharing) {
@@ -1097,9 +1112,32 @@ export default function LiveClass() {
       if (socket) {
         socket.disconnect();
       }
-      
-      localTracksRef.current.audio?.close();
-      localTracksRef.current.video?.close();
+
+      // ✅ Robust track cleanup
+      try {
+        const audio = localTracksRef.current?.audio;
+        const video = localTracksRef.current?.video;
+
+        if (audio) {
+          // disable and unpublish defensively
+          await trackManagement.enableTrack(audio, false);
+          await trackManagement.unpublishTrack(client, audio).catch(() => {});
+          try { audio.close?.(); } catch (e) { console.warn("audio.close failed", e); }
+        }
+
+        if (video) {
+          await trackManagement.enableTrack(video, false);
+          await trackManagement.unpublishTrack(client, video).catch(() => {});
+          try { video.close?.(); } catch (e) { console.warn("video.close failed", e); }
+        }
+
+        // Clear refs/state
+        localTracksRef.current = { audio: null, video: null };
+        setLocalTracks({ audio: null, video: null });
+      } catch (err) {
+        console.error("Error during leaveClass cleanup:", err);
+      }
+
       await client.leave();
       await API.put(`/live/leave/${sessionId}`);
       setJoined(false);
@@ -1116,27 +1154,47 @@ export default function LiveClass() {
     }
   }, [chatMessages]);
 
-  // Cleanup on unmount
+  // ✅ UPDATED: Cleanup on unmount - robust track management
   useEffect(() => {
     return () => {
-      if (screenShareTrack) {
-        screenShareTrack.close();
-      }
-      
-      // ✅ Cleanup socket on component unmount
-      if (socket) {
-        socket.disconnect();
-      }
-      
-      localTracksRef.current.audio?.close();
-      localTracksRef.current.video?.close();
+      (async () => {
+        try {
+          if (screenShareTrack) {
+            screenShareTrack.close();
+          }
+          
+          // ✅ Cleanup socket on component unmount
+          if (socket) {
+            socket.disconnect();
+          }
+
+          // ✅ Robust track cleanup
+          const audio = localTracksRef.current?.audio;
+          const video = localTracksRef.current?.video;
+
+          if (audio) {
+            await trackManagement.enableTrack(audio, false);
+            await trackManagement.unpublishTrack(client, audio).catch(()=>{});
+            try { audio.close?.(); } catch(e){ console.warn("audio.close failed", e); }
+          }
+
+          if (video) {
+            await trackManagement.enableTrack(video, false);
+            await trackManagement.unpublishTrack(client, video).catch(()=>{});
+            try { video.close?.(); } catch(e){ console.warn("video.close failed", e); }
+          }
+        } catch (e) {
+          console.error("Cleanup error:", e);
+        }
+      })();
+
       client.leave();
       const intervals = window.liveClassIntervals || [];
       intervals.forEach(clearInterval);
     };
   }, []);
 
-  // Start Screen Sharing with loading state and track utilities
+  // ✅ UPDATED: Start Screen Sharing with robust track management
   const startScreenShare = async () => {
     try {
       if (!isTeacher) {
@@ -1150,7 +1208,9 @@ export default function LiveClass() {
       }, "auto");
 
       if (localTracksRef.current.video) {
-        await trackManagement.unpublishTrack(client, localTracksRef.current.video);
+        await trackManagement.unpublishTrack(client, localTracksRef.current.video).catch(e => {
+          console.warn("unpublish screen/video failed", e);
+        });
       }
 
       await trackManagement.publishTrack(client, screenTrack);
@@ -1173,7 +1233,7 @@ export default function LiveClass() {
       
       if (err.message?.includes('PERMISSION_DENIED') || err.name === 'NotAllowedError') {
         if (localTracksRef.current.video) {
-          await trackManagement.publishTrack(client, localTracksRef.current.video);
+          await trackManagement.publishTrack(client, localTracksRef.current.video).catch(()=>{});
           localTracksRef.current.video.play("local-player");
         }
       }
@@ -1182,19 +1242,21 @@ export default function LiveClass() {
     }
   };
 
-  // Stop Screen Sharing with loading state and track utilities
+  // ✅ UPDATED: Stop Screen Sharing with robust track management
   const stopScreenShare = async () => {
     try {
       setIsScreenShareLoading(true);
 
       if (screenShareTrack) {
-        await trackManagement.unpublishTrack(client, screenShareTrack);
+        await trackManagement.unpublishTrack(client, screenShareTrack).catch(e => {
+          console.warn("unpublish screen share failed", e);
+        });
         screenShareTrack.close();
         setScreenShareTrack(null);
       }
 
       if (localTracksRef.current.video) {
-        await trackManagement.publishTrack(client, localTracksRef.current.video);
+        await trackManagement.publishTrack(client, localTracksRef.current.video).catch(()=>{});
         localTracksRef.current.video.play("local-player");
       }
 
@@ -1219,15 +1281,28 @@ export default function LiveClass() {
     }
   };
 
-  // Toggle Video On/Off with loading state and track utilities
+  // ✅ UPDATED: Toggle Video On/Off with robust track management
   const toggleVideo = async () => {
-    if (!localTracksRef.current.video || isVideoLoading) return;
+    if (isVideoLoading) return;
+    
+    const video = localTracksRef.current?.video;
+    if (!video) {
+      console.warn("toggleVideo: no video track");
+      return;
+    }
 
     setIsVideoLoading(true);
     try {
-      const newVideoState = !isVideoOn;
-      trackManagement.enableTrack(localTracksRef.current.video, newVideoState);
-      setIsVideoOn(newVideoState);
+      const enable = !isVideoOn;
+      await trackManagement.enableTrack(video, enable);
+      setIsVideoOn(enable);
+
+      // Control publish state based on video state
+      if (enable) {
+        await trackManagement.publishTrack(client, video).catch(()=>{});
+      } else {
+        await trackManagement.unpublishTrack(client, video).catch(()=>{});
+      }
     } catch (err) {
       console.error("Toggle video failed:", err);
     } finally {
