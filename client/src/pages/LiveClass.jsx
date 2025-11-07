@@ -389,10 +389,19 @@ export default function LiveClass() {
       setLocalTracks({ audio: audioTrack, video: videoTrack });
       videoTrack.play("local-player");
 
-      // ✅ Get participant mute state from backend before publishing
-      const participant = session.participants.find(
-        (p) => p.studentId === user.id
+      // ✅ Safely determine participant mute state BEFORE publishing
+      // Prefer the fresh sessionResponse (fetched above). Fall back to joinResponse.session if available.
+      const sessionData = sessionResponse?.data ?? session ?? {};
+      const participantsList = sessionData.participants ?? [];
+
+      // get current user id in a safe way
+      const currentUserId = String(localStorage.getItem("userId") || participantInfo?.studentId || "");
+
+      // find participant safely
+      const participant = participantsList.find(
+        (p) => String(p.studentId) === currentUserId
       );
+
       const joinMuted = participant?.isMuted === true;
 
       // ✅ Mute BEFORE publishing so student joins silent
