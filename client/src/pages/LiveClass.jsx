@@ -348,6 +348,11 @@ export default function LiveClass() {
       
       const { session, token: agoraToken, participantInfo } = joinResponse.data;
       
+      // ✅ ADD: Safety check for participantInfo
+      if (!participantInfo) {
+        console.warn("⚠️ participantInfo is undefined in join response, using safe defaults");
+      }
+
       // ✅ CRITICAL FIX: Check if student was previously muted by teacher
       // Get latest session data to see current mute state
       const sessionResponse = await API.get(`/live/session/${sessionId}`);
@@ -355,19 +360,26 @@ export default function LiveClass() {
         p => p.studentId === localStorage.getItem("userId")
       );
       
-      // Use the ACTUAL current mute state, not just initial participantInfo
-      const actualIsMuted = currentParticipant ? currentParticipant.isMuted : participantInfo.isMuted;
-      const actualHasPermission = currentParticipant ? currentParticipant.hasSpeakingPermission : participantInfo.hasSpeakingPermission;
+      // ✅ FIX: Safely handle participantInfo being undefined
+      const actualIsMuted = currentParticipant ? 
+        currentParticipant.isMuted : 
+        (participantInfo ? participantInfo.isMuted : true); // Default to muted if no info
+
+      const actualHasPermission = currentParticipant ? 
+        currentParticipant.hasSpeakingPermission : 
+        (participantInfo ? participantInfo.hasSpeakingPermission : false); // Default to no permission
       
       setSessionInfo(session);
       setParticipantInfo(participantInfo);
       setIsMuted(actualIsMuted); // ✅ Use actual current state
       setHasSpeakingPermission(actualHasPermission); // ✅ Use actual current state
       
-      const isUserTeacher = participantInfo.role === "host" || userRole === "teacher" || userRole === "admin";
+      const isUserTeacher = participantInfo ? 
+        (participantInfo.role === "host" || userRole === "teacher" || userRole === "admin") : 
+        (userRole === "teacher" || userRole === "admin");
       setIsTeacher(isUserTeacher);
       
-      debugLog("User role:", { isTeacher: isUserTeacher, participantRole: participantInfo.role });
+      debugLog("User role:", { isTeacher: isUserTeacher, participantRole: participantInfo?.role });
 
       const uid = await client.join(appId, session.channelName, agoraToken, null);
 
@@ -399,7 +411,7 @@ export default function LiveClass() {
       const participantsList = sessionData.participants ?? [];
 
       // get current user id in a safe way
-      const currentUserId = String(localStorage.getItem("userId") || participantInfo?.studentId || "");
+      const currentUserId = String(localStorage.getItem("userId") || (participantInfo ? participantInfo.studentId : "") || "");
 
       // find participant safely
       const participant = participantsList.find(
