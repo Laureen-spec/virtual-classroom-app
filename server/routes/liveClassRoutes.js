@@ -59,13 +59,10 @@ router.post("/start", verifyToken, async (req, res) => {
         role: "host",
         isMuted: false,
         isHandRaised: false,
-        hasSpeakingPermission: true, // Teacher has speaking permission by default
-        permissionRequested: false,
         videoOn: false,
         lastJoinTime: new Date()
       }],
       settings: {
-        allowSelfUnmute: false, // Students cannot self-unmute without permission
         autoMuteNewStudents: true // All new students join muted
       }
     });
@@ -136,7 +133,7 @@ router.get("/teacher-session/:classId", verifyToken, async (req, res) => {
   }
 });
 
-// 🔹 Join a live class (Student/Teacher/Admin) - FIXED ADMIN AUTH
+// 🔹 Join a live class (Student/Teacher/Admin) - UPDATED: Remove speaking permission requirement
 router.post("/join/:sessionId", verifyToken, async (req, res) => {
   try {
     const { sessionId } = req.params;
@@ -217,20 +214,17 @@ router.post("/join/:sessionId", verifyToken, async (req, res) => {
 
     let role = RtcRole.SUBSCRIBER;
     let isMuted = liveSession.settings.autoMuteNewStudents;
-    let hasSpeakingPermission = false;
 
     // ✅ IMPROVED ADMIN ROLE HANDLING
     if (req.user.role === "admin") {
       role = RtcRole.PUBLISHER;
       isMuted = false;
-      hasSpeakingPermission = true;
       console.log("🔧 ADMIN joining with FULL HOST privileges");
     }
     // Teacher joins as host
     else if (req.user.role === "teacher" && liveSession.teacherId._id.toString() === req.user.id) {
       role = RtcRole.PUBLISHER;
       isMuted = false;
-      hasSpeakingPermission = true;
       console.log("👨‍🏫 Teacher joining with host privileges");
       
       // Reset leftAt time when teacher rejoins
@@ -248,10 +242,9 @@ router.post("/join/:sessionId", verifyToken, async (req, res) => {
         });
       }
     } else {
-      // ✅ CRITICAL FIX: Students join muted with no speaking permission
+      // ✅ UPDATED: Students join muted but CAN SELF-UNMUTE WITHOUT PERMISSION
       isMuted = true;
-      hasSpeakingPermission = false;
-      console.log("🎓 Student joining muted with no speaking permission");
+      console.log("🎓 Student joining muted but can self-unmute");
     }
 
     // Add user to participants if not already added
@@ -261,25 +254,21 @@ router.post("/join/:sessionId", verifyToken, async (req, res) => {
         role: req.user.role === "teacher" || req.user.role === "admin" ? "host" : "audience",
         isMuted,
         isHandRaised: false,
-        hasSpeakingPermission,
-        permissionRequested: false,
         lastJoinTime: new Date(),
-        videoOn: req.user.role === "admin" ? true : false // Default video on for admin
+        videoOn: req.user.role === "admin" ? true : false
       };
       
       liveSession.participants.push(newParticipant);
       console.log("✅ Added new participant:", {
         userId: req.user.id,
         role: newParticipant.role,
-        isMuted: newParticipant.isMuted,
-        hasSpeakingPermission: newParticipant.hasSpeakingPermission
+        isMuted: newParticipant.isMuted
       });
     } else {
       existingParticipant.lastJoinTime = new Date();
-      // ✅ FORCE UPDATE ROLE FOR ADMIN (in case they rejoined)
+      // ✅ UPDATED: Admin role update without permission
       if (req.user.role === "admin") {
         existingParticipant.role = "host";
-        existingParticipant.hasSpeakingPermission = true;
         existingParticipant.isMuted = false;
         existingParticipant.videoOn = true;
         console.log("✅ Updated existing admin participant with HOST privileges");
@@ -313,10 +302,8 @@ router.post("/join/:sessionId", verifyToken, async (req, res) => {
       },
       participantInfo: {
         isMuted,
-        hasSpeakingPermission,
-        canSelfUnmute: hasSpeakingPermission && !isMuted,
         role: req.user.role === "teacher" || req.user.role === "admin" ? "host" : "audience",
-        videoOn: req.user.role === "admin" ? true : false // Default video on for admin
+        videoOn: req.user.role === "admin" ? true : false
       },
       token,
       appId: process.env.VITE_AGORA_APP_ID,
@@ -326,8 +313,7 @@ router.post("/join/:sessionId", verifyToken, async (req, res) => {
     console.log("📤 Sending join response:", {
       userId: req.user.id,
       userRole: req.user.role,
-      isHost: responseData.session.isHost,
-      hasSpeakingPermission: responseData.participantInfo.hasSpeakingPermission
+      isHost: responseData.session.isHost
     });
 
     res.json(responseData);
@@ -394,245 +380,7 @@ router.put("/video/:sessionId", verifyToken, async (req, res) => {
   }
 });
 
-// 🔹 Request Speaking Permission (Student)
-router.post("/request-speaking/:sessionId", verifyToken, async (req, res) => {
-  try {
-    const { sessionId } = req.params;
-
-    const liveSession = await LiveSession.findById(sessionId);
-    if (!liveSession) {
-      return res.status(404).json({ message: "Live session not found" });
-    }
-
-    // Check if user is a student
-    if (req.user.role === "teacher" || req.user.role === "admin") {
-      return res.status(400).json({ message: "Teachers and admins don't need to request speaking permission" });
-    }
-
-    // Find participant
-    const participantIndex = liveSession.participants.findIndex(
-      p => p.studentId.toString() === req.user.id
-    );
-
-    if (participantIndex === -1) {
-      return res.status(404).json({ message: "You are not in this live session" });
-    }
-
-    const participant = liveSession.participants[participantIndex];
-
-    // Check if already has permission
-    if (participant.hasSpeakingPermission) {
-      return res.status(400).json({ message: "You already have speaking permission" });
-    }
-
-    // Check if already requested
-    if (participant.permissionRequested) {
-      return res.status(400).json({ message: "You have already requested speaking permission" });
-    }
-
-    // Update permission request status
-    liveSession.participants[participantIndex].permissionRequested = true;
-
-    // Add to permission requests array
-    liveSession.permissionRequests.push({
-      studentId: req.user.id,
-      status: "pending"
-    });
-
-    // Add system message
-    const user = await User.findById(req.user.id);
-    liveSession.chatMessages.push({
-      userId: req.user.id,
-      userName: user.name,
-      message: `${user.name} requested speaking permission`,
-      messageType: "permission_request",
-      metadata: {
-        studentId: req.user.id,
-        action: "request_speaking"
-      }
-    });
-
-    await liveSession.save();
-
-    res.json({
-      message: "Speaking permission requested successfully",
-      permissionRequested: true,
-      status: "pending"
-    });
-
-  } catch (error) {
-    console.error("Error requesting speaking permission:", error);
-    res.status(500).json({ message: "Failed to request speaking permission", error: error.message });
-  }
-});
-
-// 🔹 Grant Speaking Permission (Teacher only) - ENHANCED AUDIO HANDLING WITH IMMEDIATE RESPONSE DATA
-router.put("/grant-speaking/:sessionId/:studentId", verifyToken, async (req, res) => {
-  try {
-    const { sessionId, studentId } = req.params;
-
-    // ✅ ADDED DEBUG LINE TO VERIFY ENDPOINT IS BEING CALLED
-    console.log("🎯 GRANT SPEAKING PERMISSION - Backend called:", {
-      sessionId,
-      studentId,
-      teacherId: req.user.id
-    });
-
-    const liveSession = await LiveSession.findById(sessionId);
-    if (!liveSession) {
-      return res.status(404).json({ message: "Live session not found" });
-    }
-
-    // Check if user is teacher and owns the session
-    if (liveSession.teacherId.toString() !== req.user.id) {
-      return res.status(403).json({ message: "Only the teacher can grant speaking permission" });
-    }
-
-    // Find and update participant
-    const participantIndex = liveSession.participants.findIndex(
-      p => p.studentId.toString() === studentId
-    );
-
-    if (participantIndex === -1) {
-      return res.status(404).json({ message: "Student not found in this session" });
-    }
-
-    // CRITICAL: Grant speaking permission and unmute
-    liveSession.participants[participantIndex].hasSpeakingPermission = true;
-    liveSession.participants[participantIndex].isMuted = false; // Ensure unmuted
-    liveSession.participants[participantIndex].permissionRequested = false;
-
-    // Update permission request status
-    const requestIndex = liveSession.permissionRequests.findIndex(
-      r => r.studentId.toString() === studentId && r.status === "pending"
-    );
-
-    if (requestIndex !== -1) {
-      liveSession.permissionRequests[requestIndex].status = "approved";
-      liveSession.permissionRequests[requestIndex].handledAt = new Date();
-      liveSession.permissionRequests[requestIndex].handledBy = req.user.id;
-    }
-
-    // Add system message with explicit audio state
-    const teacher = await User.findById(req.user.id);
-    const student = await User.findById(studentId);
-    liveSession.chatMessages.push({
-      userId: req.user.id,
-      userName: teacher.name,
-      message: `${teacher.name} granted speaking permission to ${student.name} - Audio should now work`,
-      messageType: "permission_granted",
-      metadata: {
-        studentId: studentId,
-        action: "grant_permission",
-        audioEnabled: true,
-        canSpeak: true
-      }
-    });
-
-    await liveSession.save();
-
-    console.log(`✅ Speaking permission granted to ${studentId} - Audio unmuted`);
-
-    // ✅ ENHANCEMENT: Force immediate participant data inclusion in response
-    const updatedParticipant = liveSession.participants.find(
-      p => p.studentId.toString() === studentId
-    );
-
-    res.json({
-      message: "Speaking permission granted successfully - Student can now speak",
-      studentId,
-      hasSpeakingPermission: true,
-      isMuted: false,
-      audioState: "enabled",
-      // ✅ CRITICAL: Include immediate participant data for frontend synchronization
-      participant: {
-        studentId: updatedParticipant.studentId,
-        isMuted: updatedParticipant.isMuted,
-        hasSpeakingPermission: updatedParticipant.hasSpeakingPermission,
-        permissionRequested: updatedParticipant.permissionRequested,
-        role: updatedParticipant.role
-      },
-      // ✅ ADDITIONAL: Include timestamp for immediate updates
-      timestamp: new Date(),
-      immediateUpdate: true
-    });
-
-  } catch (error) {
-    console.error("❌ Error granting speaking permission:", error);
-    res.status(500).json({ message: "Failed to grant speaking permission", error: error.message });
-  }
-});
-
-// 🔹 Revoke Speaking Permission (Teacher only)
-router.put("/revoke-speaking/:sessionId/:studentId", verifyToken, async (req, res) => {
-  try {
-    const { sessionId, studentId } = req.params;
-
-    const liveSession = await LiveSession.findById(sessionId);
-    if (!liveSession) {
-      return res.status(404).json({ message: "Live session not found" });
-    }
-
-    // Check if user is teacher and owns the session
-    if (liveSession.teacherId.toString() !== req.user.id) {
-      return res.status(403).json({ message: "Only the teacher can revoke speaking permission" });
-    }
-
-    // Find and update participant
-    const participantIndex = liveSession.participants.findIndex(
-      p => p.studentId.toString() === studentId
-    );
-
-    if (participantIndex === -1) {
-      return res.status(404).json({ message: "Student not found in this session" });
-    }
-
-    // Revoke speaking permission and mute
-    liveSession.participants[participantIndex].hasSpeakingPermission = false;
-    liveSession.participants[participantIndex].isMuted = true;
-    liveSession.participants[participantIndex].permissionRequested = false;
-
-    // Update any pending permission requests
-    const requestIndex = liveSession.permissionRequests.findIndex(
-      r => r.studentId.toString() === studentId && r.status === "pending"
-    );
-
-    if (requestIndex !== -1) {
-      liveSession.permissionRequests[requestIndex].status = "rejected";
-      liveSession.permissionRequests[requestIndex].handledAt = new Date();
-      liveSession.permissionRequests[requestIndex].handledBy = req.user.id;
-    }
-
-    // Add system message
-    const teacher = await User.findById(req.user.id);
-    const student = await User.findById(studentId);
-    liveSession.chatMessages.push({
-      userId: req.user.id,
-      userName: teacher.name,
-      message: `${teacher.name} revoked speaking permission from ${student.name}`,
-      messageType: "permission_revoked",
-      metadata: {
-        studentId: studentId,
-        action: "revoke_permission"
-      }
-    });
-
-    await liveSession.save();
-
-    res.json({
-      message: "Speaking permission revoked successfully",
-      studentId,
-      hasSpeakingPermission: false,
-      isMuted: true
-    });
-
-  } catch (error) {
-    console.error("Error revoking speaking permission:", error);
-    res.status(500).json({ message: "Failed to revoke speaking permission", error: error.message });
-  }
-});
-
-// 🔹 Self-Mute (Student) — allow always (no speaking-permission required)
+// 🔹 Self-Mute (Student) — allow always (SIMPLIFIED)
 router.put("/self-mute/:sessionId", verifyToken, async (req, res) => {
   try {
     const { sessionId } = req.params;
@@ -644,9 +392,8 @@ router.put("/self-mute/:sessionId", verifyToken, async (req, res) => {
     );
     if (participantIndex === -1) return res.status(404).json({ message: "You are not in this live session" });
 
-    // Allow student to mute themselves anytime
+    // ✅ ALLOW student to mute themselves anytime
     liveSession.participants[participantIndex].isMuted = true;
-    // Keep speaking permission as-is (do NOT grant)
     await liveSession.save();
 
     return res.json({ message: "Self-muted successfully", isMuted: true });
@@ -656,7 +403,7 @@ router.put("/self-mute/:sessionId", verifyToken, async (req, res) => {
   }
 });
 
-// 🔹 Self-Unmute (Student with speaking permission)
+// 🔹 Self-Unmute (Student) — allow always WITHOUT PERMISSION
 router.put("/self-unmute/:sessionId", verifyToken, async (req, res) => {
   try {
     const { sessionId } = req.params;
@@ -675,19 +422,7 @@ router.put("/self-unmute/:sessionId", verifyToken, async (req, res) => {
       return res.status(404).json({ message: "You are not in this live session" });
     }
 
-    const participant = liveSession.participants[participantIndex];
-
-    // Check if has speaking permission
-    if (!participant.hasSpeakingPermission) {
-      return res.status(403).json({ message: "You need speaking permission to self-unmute" });
-    }
-
-    // Check if self-unmute is allowed
-    if (!liveSession.settings.allowSelfUnmute) {
-      return res.status(403).json({ message: "Self-unmute is currently disabled by the teacher" });
-    }
-
-    // Self-unmute
+    // ✅ ALLOW self-unmute without permission check
     liveSession.participants[participantIndex].isMuted = false;
 
     await liveSession.save();
@@ -703,7 +438,7 @@ router.put("/self-unmute/:sessionId", verifyToken, async (req, res) => {
   }
 });
 
-// 🔹 Enhanced Mute/Unmute Student (Teacher only) - WITH SOCKET INTEGRATION
+// 🔹 Enhanced Mute/Unmute Student (Teacher only) - UPDATED: Remove permission logic
 router.put("/mute/:sessionId/:studentId", verifyToken, async (req, res) => {
   try {
     const { sessionId, studentId } = req.params;
@@ -726,21 +461,12 @@ router.put("/mute/:sessionId/:studentId", verifyToken, async (req, res) => {
       p => p.studentId.toString() === studentId
     );
 
-    // ✅ FIX 2: Add guard clause for student not found
     if (participantIndex === -1) {
       return res.status(404).json({ message: "Student not found in this session" });
     }
 
-    // ✅ CRITICAL FIX: REMOVED speaking permission check for teacher mute/unmute
-    // Teacher can mute/unmute any student regardless of speaking permission
-
-    // CRITICAL: Update mute status
+    // ✅ UPDATED: Only update mute status
     liveSession.participants[participantIndex].isMuted = mute;
-
-    // CRITICAL: If muting, also revoke speaking permission temporarily
-    if (mute === true) {
-      liveSession.participants[participantIndex].hasSpeakingPermission = false;
-    }
 
     // Add system message
     const teacher = await User.findById(req.user.id);
@@ -763,7 +489,7 @@ router.put("/mute/:sessionId/:studentId", verifyToken, async (req, res) => {
 
     console.log(`✅ Student ${actionText} successfully:`, studentId);
 
-    // ✅ FIX 1: Get io instance and emit socket event after DB update
+    // Socket emission
     const io = req.app.get("io");
     if (io) {
       const activeSessions = req.app.get("activeSessions");
@@ -782,22 +508,17 @@ router.put("/mute/:sessionId/:studentId", verifyToken, async (req, res) => {
       }
     }
 
-    // CRITICAL FIX: Return complete participant data for immediate frontend sync
     const updatedParticipant = liveSession.participants[participantIndex];
     
     res.json({
       message: `Student ${actionText} successfully`,
       studentId,
       isMuted: mute,
-      // ✅ FIX 3: Return updated participant for immediate UI update
       participant: {
         studentId: updatedParticipant.studentId,
         isMuted: updatedParticipant.isMuted,
-        hasSpeakingPermission: updatedParticipant.hasSpeakingPermission,
-        permissionRequested: updatedParticipant.permissionRequested,
         role: updatedParticipant.role
       },
-      // ADDITIONAL: Include timestamp for immediate updates
       timestamp: new Date(),
       immediateUpdate: true
     });
@@ -808,7 +529,7 @@ router.put("/mute/:sessionId/:studentId", verifyToken, async (req, res) => {
   }
 });
 
-// 🔹 Mute All Students (Teacher only) - WITH SOCKET INTEGRATION
+// 🔹 Mute All Students (Teacher only) - UPDATED: Remove permission logic
 router.put("/mute-all/:sessionId", verifyToken, async (req, res) => {
   try {
     const { sessionId } = req.params;
@@ -825,12 +546,10 @@ router.put("/mute-all/:sessionId", verifyToken, async (req, res) => {
 
     let mutedCount = 0;
 
-    // CRITICAL FIX: Mute all non-host participants (students)
+    // ✅ UPDATED: Only mute non-host participants
     liveSession.participants.forEach((participant, index) => {
-      if (participant.role !== "host") { // Mute everyone who isn't host/teacher
+      if (participant.role !== "host") {
         liveSession.participants[index].isMuted = true;
-        // Also revoke speaking permission when muted
-        liveSession.participants[index].hasSpeakingPermission = false;
         mutedCount++;
       }
     });
@@ -852,7 +571,7 @@ router.put("/mute-all/:sessionId", verifyToken, async (req, res) => {
 
     console.log(`✅ All students muted: ${mutedCount} participants affected`);
 
-    // ✅ FIX 1: Emit socket event for mute-all
+    // Socket emission
     const io = req.app.get("io");
     if (io) {
       io.to(sessionId).emit("mute-all", {
@@ -866,12 +585,9 @@ router.put("/mute-all/:sessionId", verifyToken, async (req, res) => {
     res.json({
       message: "All students muted successfully",
       mutedCount: mutedCount,
-      // CRITICAL: Return updated participants list for frontend sync
       participants: liveSession.participants.map(p => ({
         studentId: p.studentId,
         isMuted: p.isMuted,
-        hasSpeakingPermission: p.hasSpeakingPermission,
-        permissionRequested: p.permissionRequested,
         role: p.role
       }))
     });
@@ -882,7 +598,7 @@ router.put("/mute-all/:sessionId", verifyToken, async (req, res) => {
   }
 });
 
-// 🔹 Unmute All Students (Teacher only) - WITH SOCKET INTEGRATION
+// 🔹 Unmute All Students (Teacher only) - UPDATED: Remove permission logic
 router.put("/unmute-all/:sessionId", verifyToken, async (req, res) => {
   try {
     const { sessionId } = req.params;
@@ -899,12 +615,10 @@ router.put("/unmute-all/:sessionId", verifyToken, async (req, res) => {
 
     let unmutedCount = 0;
 
-    // CRITICAL FIX: Unmute all non-host participants
+    // ✅ UPDATED: Only unmute non-host participants
     liveSession.participants.forEach((participant, index) => {
       if (participant.role !== "host") {
         liveSession.participants[index].isMuted = false;
-        // Restore speaking permission when unmuted
-        liveSession.participants[index].hasSpeakingPermission = true;
         unmutedCount++;
       }
     });
@@ -926,7 +640,7 @@ router.put("/unmute-all/:sessionId", verifyToken, async (req, res) => {
 
     console.log(`✅ All students unmuted: ${unmutedCount} participants affected`);
 
-    // ✅ FIX 1: Emit socket event for unmute-all
+    // Socket emission
     const io = req.app.get("io");
     if (io) {
       io.to(sessionId).emit("unmute-all", {
@@ -940,12 +654,9 @@ router.put("/unmute-all/:sessionId", verifyToken, async (req, res) => {
     res.json({
       message: "All students unmuted successfully",
       unmutedCount: unmutedCount,
-      // CRITICAL: Return updated participants list for frontend sync
       participants: liveSession.participants.map(p => ({
         studentId: p.studentId,
         isMuted: p.isMuted,
-        hasSpeakingPermission: p.hasSpeakingPermission,
-        permissionRequested: p.permissionRequested,
         role: p.role
       }))
     });
@@ -960,7 +671,7 @@ router.put("/unmute-all/:sessionId", verifyToken, async (req, res) => {
 router.put("/settings/:sessionId", verifyToken, async (req, res) => {
   try {
     const { sessionId } = req.params;
-    const { allowSelfUnmute, autoMuteNewStudents } = req.body;
+    const { autoMuteNewStudents } = req.body;
 
     const liveSession = await LiveSession.findById(sessionId);
     if (!liveSession) {
@@ -973,9 +684,6 @@ router.put("/settings/:sessionId", verifyToken, async (req, res) => {
     }
 
     // Update settings
-    if (typeof allowSelfUnmute === 'boolean') {
-      liveSession.settings.allowSelfUnmute = allowSelfUnmute;
-    }
     if (typeof autoMuteNewStudents === 'boolean') {
       liveSession.settings.autoMuteNewStudents = autoMuteNewStudents;
     }
@@ -993,62 +701,22 @@ router.put("/settings/:sessionId", verifyToken, async (req, res) => {
   }
 });
 
-// 🔹 Get Pending Permission Requests (Teacher only)
-router.get("/pending-requests/:sessionId", verifyToken, async (req, res) => {
-  try {
-    const { sessionId } = req.params;
-
-    const liveSession = await LiveSession.findById(sessionId)
-      .populate("permissionRequests.studentId", "name email")
-      .populate("participants.studentId", "name");
-
-    if (!liveSession) {
-      return res.status(404).json({ message: "Live session not found" });
-    }
-
-    // Check if user is teacher and owns the session
-    if (liveSession.teacherId.toString() !== req.user.id) {
-      return res.status(403).json({ message: "Only the teacher can view permission requests" });
-    }
-
-    const pendingRequests = liveSession.permissionRequests.filter(
-      request => request.status === "pending"
-    );
-
-    res.json({
-      pendingRequests: pendingRequests.map(request => ({
-        requestId: request._id,
-        studentId: request.studentId._id,
-        studentName: request.studentId.name,
-        studentEmail: request.studentId.email,
-        requestedAt: request.requestedAt
-      })),
-      totalPending: pendingRequests.length
-    });
-
-  } catch (error) {
-    console.error("Error fetching pending requests:", error);
-    res.status(500).json({ message: "Failed to fetch pending requests", error: error.message });
-  }
-});
-
-// 🔹 Enhanced Get Session Info (FIXED session status detection) - UPDATED WITH PAGINATION
+// 🔹 Enhanced Get Session Info - UPDATED: Remove permission data
 router.get("/session/:sessionId", verifyToken, async (req, res) => {
   try {
     const { sessionId } = req.params;
-    const { page = 1, limit = 50 } = req.query; // NEW: Add pagination params
+    const { page = 1, limit = 50 } = req.query;
 
     console.log("🔍 DEBUG: Fetching session info for:", sessionId);
     console.log("🔍 DEBUG: Request user ID:", req.user.id);
     console.log("🔍 DEBUG: Request user role:", req.user.role);
-    console.log("🔍 DEBUG: Pagination params - page:", page, "limit:", limit); // NEW: Log pagination
+    console.log("🔍 DEBUG: Pagination params - page:", page, "limit:", limit);
 
     const liveSession = await LiveSession.findById(sessionId)
       .populate("classId", "title description")
       .populate("teacherId", "name")
       .populate("participants.studentId", "name role")
-      .populate("chatMessages.userId", "name")
-      .populate("permissionRequests.studentId", "name");
+      .populate("chatMessages.userId", "name");
 
     if (!liveSession) {
       console.log("❌ Session not found:", sessionId);
@@ -1067,7 +735,7 @@ router.get("/session/:sessionId", verifyToken, async (req, res) => {
     console.log("🔍 DEBUG: User is teacher:", isUserTeacher);
     console.log("🔍 DEBUG: User is admin:", isUserAdmin);
 
-    // NEW: Calculate pagination for chat messages
+    // Calculate pagination for chat messages
     const totalMessages = liveSession.chatMessages.length;
     const pageNum = parseInt(page);
     const limitNum = parseInt(limit);
@@ -1097,7 +765,7 @@ router.get("/session/:sessionId", verifyToken, async (req, res) => {
         teacherId: liveSession.teacherId,
         channelName: liveSession.channelName,
         sessionTitle: liveSession.sessionTitle,
-        isActive: liveSession.isActive !== undefined ? liveSession.isActive : true, // ✅ FIX
+        isActive: liveSession.isActive !== undefined ? liveSession.isActive : true,
         startTime: liveSession.startTime,
         endTime: liveSession.endTime,
         settings: liveSession.settings,
@@ -1109,15 +777,12 @@ router.get("/session/:sessionId", verifyToken, async (req, res) => {
         role: p.studentId.role,
         isHandRaised: p.isHandRaised,
         isMuted: p.isMuted,
-        hasSpeakingPermission: p.hasSpeakingPermission,
-        permissionRequested: p.permissionRequested,
         videoOn: p.videoOn,
         totalTimeSpent: p.totalTimeSpent,
         lastJoinTime: p.lastJoinTime,
         joinedAt: p.joinedAt,
         isScreenSharing: p.isScreenSharing
       })),
-      // UPDATED: Return paginated chat messages
       chatMessages: paginatedMessages.map(m => ({
         userName: m.userId?.name || "System",
         message: m.message,
@@ -1125,23 +790,13 @@ router.get("/session/:sessionId", verifyToken, async (req, res) => {
         messageType: m.messageType,
         metadata: m.metadata
       })),
-      permissionRequests: liveSession.permissionRequests.map(r => ({
-        requestId: r._id,
-        studentId: r.studentId._id,
-        studentName: r.studentId.name,
-        status: r.status,
-        requestedAt: r.requestedAt,
-        handledAt: r.handledAt
-      })),
       settings: liveSession.settings,
-      // ADD CRITICAL FIELDS FOR FRONTEND:
       userPermissions: {
         isTeacher: isUserTeacher,
         isAdmin: isUserAdmin,
         canManageSession: isUserTeacher || isUserAdmin,
         userId: req.user.id
       },
-      // NEW: Add pagination info
       pagination: {
         currentPage: pageNum,
         totalPages: Math.ceil(totalMessages / limitNum),
@@ -1155,7 +810,7 @@ router.get("/session/:sessionId", verifyToken, async (req, res) => {
     console.log("🔍 DEBUG: Sending response with", responseData.chatMessages.length, "chat messages");
     console.log("🔍 DEBUG: First chat message:", responseData.chatMessages[0]);
     console.log("🔍 DEBUG: Session isActive in response:", responseData.session.isActive);
-    console.log("🔍 DEBUG: Pagination info:", responseData.pagination); // NEW: Log pagination
+    console.log("🔍 DEBUG: Pagination info:", responseData.pagination);
 
     res.json(responseData);
 
@@ -1165,7 +820,7 @@ router.get("/session/:sessionId", verifyToken, async (req, res) => {
   }
 });
 
-// 🔹 Enhanced Raise/Lower Hand (Student) - Now includes permission request
+// 🔹 Enhanced Raise/Lower Hand (Student) - UPDATED: Remove auto permission request
 router.put("/hand/:sessionId", verifyToken, async (req, res) => {
   try {
     const { sessionId } = req.params;
@@ -1189,21 +844,8 @@ router.put("/hand/:sessionId", verifyToken, async (req, res) => {
       return res.status(404).json({ message: "You are not in this live session" });
     }
 
-    const participant = liveSession.participants[participantIndex];
-
     // Update hand raise status
     liveSession.participants[participantIndex].isHandRaised = action === "raise";
-
-    // If raising hand and doesn't have speaking permission, auto-request permission
-    if (action === "raise" && !participant.hasSpeakingPermission && !participant.permissionRequested) {
-      liveSession.participants[participantIndex].permissionRequested = true;
-      
-      // Add to permission requests
-      liveSession.permissionRequests.push({
-        studentId: req.user.id,
-        status: "pending"
-      });
-    }
 
     // Add system message for hand raise/lower
     const user = await User.findById(req.user.id);
@@ -1220,8 +862,7 @@ router.put("/hand/:sessionId", verifyToken, async (req, res) => {
 
     res.json({
       message: `Hand ${action}ed successfully`,
-      isHandRaised: action === "raise",
-      permissionRequested: action === "raise" && !participant.hasSpeakingPermission
+      isHandRaised: action === "raise"
     });
 
   } catch (error) {
@@ -1445,10 +1086,10 @@ router.post("/screen-share/stop/:sessionId", verifyToken, async (req, res) => {
   }
 });
 
-// 🔹 Start Recording (Teacher only) - FIXED sessionId typo
+// 🔹 Start Recording (Teacher only)
 router.post("/recording/start/:sessionId", verifyToken, async (req, res) => {
   try {
-    const { sessionId } = req.params; // ✅ Make sure this line exists
+    const { sessionId } = req.params;
 
     const liveSession = await LiveSession.findById(sessionId);
     if (!liveSession) {

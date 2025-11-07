@@ -71,7 +71,7 @@ const activeSessions = new Map();
 io.on("connection", (socket) => {
   console.log(`🔌 New socket connected: ${socket.id}`);
 
-  // ✅ UPDATED: Join a live session room with string normalization
+  // ✅ Join a live session room with string normalization
   socket.on("join-session", (data) => {
     const { sessionId, userId, userRole } = data;
 
@@ -99,7 +99,7 @@ io.on("connection", (socket) => {
     });
   });
 
-  // ✅ ENHANCED: Mute specific student (Teacher only) - TARGETS SPECIFIC SOCKET ID
+  // ✅ UPDATED: Mute specific student - REMOVE PERMISSION LOGIC
   socket.on("mute-student", async (data) => {
     const { sessionId, targetId, teacherId } = data;
     
@@ -114,11 +114,11 @@ io.on("connection", (socket) => {
         return;
       }
 
-      // Update DB: set participant.isMuted = true and revoke speaking permission
+      // ✅ UPDATED: Only update mute status, not permissions
       const pIndex = liveSession.participants.findIndex(p => p.studentId.toString() === String(targetId));
       if (pIndex !== -1) {
         liveSession.participants[pIndex].isMuted = true;
-        liveSession.participants[pIndex].hasSpeakingPermission = false;
+        // ❌ REMOVED: liveSession.participants[pIndex].hasSpeakingPermission = false;
         await liveSession.save();
       }
 
@@ -141,7 +141,7 @@ io.on("connection", (socket) => {
       io.in(sessionId).emit("participant-updated", {
         studentId: targetId,
         isMuted: true,
-        hasSpeakingPermission: false,
+        // ❌ REMOVED: hasSpeakingPermission: false,
         timestamp: new Date()
       });
 
@@ -153,7 +153,7 @@ io.on("connection", (socket) => {
     }
   });
 
-  // ✅ ENHANCED: Unmute specific student (Teacher only) - TARGETS SPECIFIC SOCKET ID
+  // ✅ UPDATED: Unmute specific student - REMOVE PERMISSION LOGIC
   socket.on("unmute-student", async (data) => {
     const { sessionId, targetId, teacherId } = data;
     
@@ -168,12 +168,12 @@ io.on("connection", (socket) => {
         return;
       }
 
-      // Update DB: set participant.isMuted = false and grant speaking permission
+      // ✅ UPDATED: Only update mute status, not permissions
       const pIndex = liveSession.participants.findIndex(p => p.studentId.toString() === String(targetId));
       if (pIndex !== -1) {
         liveSession.participants[pIndex].isMuted = false;
-        liveSession.participants[pIndex].hasSpeakingPermission = true;
-        liveSession.participants[pIndex].permissionRequested = false;
+        // ❌ REMOVED: liveSession.participants[pIndex].hasSpeakingPermission = true;
+        // ❌ REMOVED: liveSession.participants[pIndex].permissionRequested = false;
         await liveSession.save();
       }
 
@@ -196,7 +196,7 @@ io.on("connection", (socket) => {
       io.in(sessionId).emit("participant-updated", {
         studentId: targetId,
         isMuted: false,
-        hasSpeakingPermission: true,
+        // ❌ REMOVED: hasSpeakingPermission: true,
         timestamp: new Date()
       });
 
@@ -208,7 +208,7 @@ io.on("connection", (socket) => {
     }
   });
 
-  // ✅ Mute all students (Teacher only) - PRESERVED ORIGINAL FUNCTIONALITY
+  // ✅ UPDATED: Mute all students - REMOVE PERMISSION LOGIC
   socket.on("mute-all", async (data) => {
     const { sessionId, teacherId } = data;
     
@@ -223,12 +223,12 @@ io.on("connection", (socket) => {
         return;
       }
 
-      // Update DB: mute all non-host participants
+      // ✅ UPDATED: Only mute non-host participants, don't revoke permissions
       let mutedCount = 0;
       liveSession.participants.forEach((participant, index) => {
         if (participant.role !== "host") {
           liveSession.participants[index].isMuted = true;
-          liveSession.participants[index].hasSpeakingPermission = false;
+          // ❌ REMOVED: liveSession.participants[index].hasSpeakingPermission = false;
           mutedCount++;
         }
       });
@@ -247,7 +247,7 @@ io.on("connection", (socket) => {
           io.in(sessionId).emit("participant-updated", {
             studentId: participant.studentId,
             isMuted: true,
-            hasSpeakingPermission: false,
+            // ❌ REMOVED: hasSpeakingPermission: false,
             timestamp: new Date()
           });
         }
@@ -261,7 +261,7 @@ io.on("connection", (socket) => {
     }
   });
 
-  // ✅ Unmute all students (Teacher only) - PRESERVED ORIGINAL FUNCTIONALITY
+  // ✅ UPDATED: Unmute all students - REMOVE PERMISSION LOGIC
   socket.on("unmute-all", async (data) => {
     const { sessionId, teacherId } = data;
     
@@ -276,12 +276,12 @@ io.on("connection", (socket) => {
         return;
       }
 
-      // Update DB: unmute all non-host participants
+      // ✅ UPDATED: Only unmute non-host participants, don't grant permissions
       let unmutedCount = 0;
       liveSession.participants.forEach((participant, index) => {
         if (participant.role !== "host") {
           liveSession.participants[index].isMuted = false;
-          liveSession.participants[index].hasSpeakingPermission = true;
+          // ❌ REMOVED: liveSession.participants[index].hasSpeakingPermission = true;
           unmutedCount++;
         }
       });
@@ -300,7 +300,7 @@ io.on("connection", (socket) => {
           io.in(sessionId).emit("participant-updated", {
             studentId: participant.studentId,
             isMuted: false,
-            hasSpeakingPermission: true,
+            // ❌ REMOVED: hasSpeakingPermission: true,
             timestamp: new Date()
           });
         }

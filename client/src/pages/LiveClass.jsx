@@ -15,12 +15,10 @@ export default function LiveClass() {
   const [isMuted, setIsMuted] = useState(true);
   const [isVideoOn, setIsVideoOn] = useState(true);
   const [isHandRaised, setIsHandRaised] = useState(false);
-  const [hasSpeakingPermission, setHasSpeakingPermission] = useState(false);
   const [chatMessages, setChatMessages] = useState([]);
   const [newMessage, setNewMessage] = useState("");
   const [participants, setParticipants] = useState([]);
   const [isTeacher, setIsTeacher] = useState(false);
-  const [pendingRequests, setPendingRequests] = useState([]);
 
   // ✅ ADD SOCKET STATE
   const [socket, setSocket] = useState(null);
@@ -183,14 +181,13 @@ export default function LiveClass() {
 
     const userId = localStorage.getItem("userId");
 
-    // ✅ ENHANCED: Mute student handler with unpublishing
+    // ✅ UPDATED: Mute student handler - only update UI, don't block physical mute
     socket.on("mute-student", async (data) => {
       debugLog("🔇 Received mute-student event:", data);
       
       // Only apply to the targeted student
       if (data.targetId === userId) {
         setIsMuted(true);
-        setHasSpeakingPermission(false);
 
         // ✅ PHYSICALLY TURN OFF MICROPHONE AND UNPUBLISH - Using localTracksRef
         if (localTracksRef.current.audio) {
@@ -201,14 +198,13 @@ export default function LiveClass() {
       }
     });
 
-    // ✅ ENHANCED: Unmute student handler with track recreation if needed
+    // ✅ UPDATED: Unmute student handler - only update UI
     socket.on("unmute-student", async (data) => {
       debugLog("🎤 Received unmute-student event:", data);
       
       // Only apply to the targeted student
       if (data.targetId === userId) {
         setIsMuted(false);
-        setHasSpeakingPermission(true);
 
         if (localTracksRef.current.audio) {
           // ✅ Re-enable existing track and republish
@@ -238,7 +234,7 @@ export default function LiveClass() {
       }
     });
 
-    // ✅ ENHANCED: Mute-all with unpublishing
+    // ✅ UPDATED: Mute-all - only update UI state
     socket.on("mute-all", async (data) => {
       debugLog("🔇 Received mute-all event:", data);
       
@@ -252,11 +248,11 @@ export default function LiveClass() {
       }
     });
 
-    // ✅ ENHANCED: Unmute-all with republishing
+    // ✅ UPDATED: Unmute-all - only update UI state
     socket.on("unmute-all", async (data) => {
       debugLog("🎤 Received unmute-all event:", data);
       
-      if (!isTeacher && hasSpeakingPermission) {
+      if (!isTeacher) {
         setIsMuted(false);
         if (localTracksRef.current.audio) {
           await localTracksRef.current.audio.setEnabled(true);
@@ -266,27 +262,14 @@ export default function LiveClass() {
       }
     });
 
-    // ✅ ADDED: Listen for participant-updated events for real-time sync
-    socket.on("participant-updated", (data) => {
-      debugLog("🔄 Received participant-updated event:", data);
-      
-      // Update local participants state if this participant is in our list
-      setParticipants(prev => prev.map(p => 
-        p.studentId === data.studentId 
-          ? { ...p, isMuted: data.isMuted, hasSpeakingPermission: data.hasSpeakingPermission }
-          : p
-      ));
-    });
-
     // Cleanup event listeners
     return () => {
       socket.off("mute-student");
       socket.off("unmute-student");
       socket.off("mute-all");
       socket.off("unmute-all");
-      socket.off("participant-updated");
     };
-  }, [socket, isTeacher, hasSpeakingPermission]);
+  }, [socket, isTeacher]);
 
   // ✅ ADDED: Join socket room when session is joined
   useEffect(() => {
@@ -304,7 +287,47 @@ export default function LiveClass() {
     }
   }, [socket, isSocketConnected, joined, sessionId]);
 
-  // ✅ ENHANCED JOIN FUNCTION: Enhanced join function with auto-mute based on session settings
+  // ✅ UPDATED: Enhanced toggle mute function - STUDENTS CAN ALWAYS MUTE/UNMUTE
+  const toggleMute = async () => {
+    if (isMuteLoading) return;
+    
+    const audio = localTracksRef.current?.audio;
+    if (!audio) {
+      console.warn("toggleMute: no audio track");
+      return;
+    }
+
+    setIsMuteLoading(true);
+    try {
+      if (isMuted) {
+        // ✅ ALLOW STUDENTS TO UNMUTE THEMSELVES WITHOUT PERMISSION
+        debugLog("🎤 Unmuting...");
+        await API.put(`/live/self-unmute/${sessionId}`);
+        trackManagement.enableTrack(audio, true);
+        setIsMuted(false);
+        
+        // Republish audio track
+        await trackManagement.publishTrack(client, audio).catch(()=>{});
+        debugLog("✅ Successfully unmuted");
+      } else {
+        // ✅ ALLOW STUDENTS TO MUTE THEMSELVES
+        debugLog("🔇 Muting...");
+        await API.put(`/live/self-mute/${sessionId}`);
+        trackManagement.enableTrack(audio, false);
+        setIsMuted(true);
+        
+        // Unpublish audio track
+        await trackManagement.unpublishTrack(client, audio).catch(()=>{});
+        debugLog("✅ Successfully muted");
+      }
+    } catch (err) {
+      console.error("❌ Toggle mute failed:", err);
+    } finally {
+      setIsMuteLoading(false);
+    }
+  };
+
+  // ✅ UPDATED: Join function - remove permission checks
   const joinClass = async () => {
     try {
       setIsJoinLoading(true);
@@ -387,15 +410,10 @@ export default function LiveClass() {
       const actualIsMuted = currentParticipant ? 
         currentParticipant.isMuted : 
         (participantInfo ? participantInfo.isMuted : true); // Default to muted if no info
-
-      const actualHasPermission = currentParticipant ? 
-        currentParticipant.hasSpeakingPermission : 
-        (participantInfo ? participantInfo.hasSpeakingPermission : false); // Default to no permission
       
       setSessionInfo(session);
       setParticipantInfo(participantInfo);
       setIsMuted(actualIsMuted); // ✅ Use actual current state
-      setHasSpeakingPermission(actualHasPermission); // ✅ Use actual current state
       
       const isUserTeacher = participantInfo ? 
         (participantInfo.role === "host" || userRole === "teacher" || userRole === "admin") : 
@@ -428,7 +446,7 @@ export default function LiveClass() {
       setLocalTracks({ audio: audioTrack, video: videoTrack });          // UI usage  
       videoTrack.play("local-player");
 
-      // ✅ NEW: Check if teacher's session requires auto-mute for students
+      // ✅ UPDATED: Check if teacher's session requires auto-mute for students
       const sessionData = sessionResponse?.data ?? session ?? {};
       if (sessionData?.settings?.autoMuteNewStudents && !isUserTeacher) {
         await audioTrack.setEnabled(false); // ✅ start muted
@@ -657,152 +675,12 @@ export default function LiveClass() {
     debugLog("💬 Chat messages updated:", chatMessages.length);
   }, [chatMessages]);
 
-  // Function to handle audio track updates when permission is granted
-  const forceAudioUpdate = async () => {
-    try {
-      if (localTracksRef.current.audio && hasSpeakingPermission) {
-        debugLog("🎯 Republishing audio track after permission grant");
-        
-        await trackManagement.unpublishTrack(client, localTracksRef.current.audio);
-        trackManagement.enableTrack(localTracksRef.current.audio, true);
-        await trackManagement.publishTrack(client, localTracksRef.current.audio);
-        
-        debugLog("✅ Audio track republished successfully after permission grant");
-      }
-    } catch (error) {
-      console.error("❌ Error forcing audio update:", error);
-    }
-  };
-
   // Debug audio state
   useEffect(() => {
-    debugLog("🎧 Audio state:", { isMuted, hasSpeakingPermission });
-  }, [isMuted, hasSpeakingPermission]);
+    debugLog("🎧 Audio state:", { isMuted });
+  }, [isMuted]);
 
-  // ✅ UPDATED: Enhanced toggle mute function with robust track management
-  const toggleMute = async () => {
-    if (isMuteLoading) return;
-    
-    const audio = localTracksRef.current?.audio;
-    if (!audio) {
-      console.warn("toggleMute: no audio track");
-      return;
-    }
-
-    setIsMuteLoading(true);
-    try {
-      if (isMuted) {
-        // If current user is teacher, allow immediate unmute without permission check
-        const role = localStorage.getItem("role");
-        if (role === "teacher") {
-          debugLog("Teacher unmuting themselves (bypass permission).");
-          try {
-            await API.put(`/live/self-unmute/${sessionId}`);
-          } catch (e) {
-            debugLog("Warning: backend self-unmute failed:", e?.message || e);
-          }
-          trackManagement.enableTrack(audio, true);
-          setIsMuted(false);
-          
-          // Republish audio track
-          await trackManagement.publishTrack(client, audio).catch(()=>{});
-          return;
-        }
-
-        // For students: only unmute if they have permission
-        if (!hasSpeakingPermission) {
-          debugLog("🔔 No speaking permission - requesting.");
-          await requestSpeakingPermission();
-        } else {
-          debugLog("🎤 Unmuting with permission.");
-          await API.put(`/live/self-unmute/${sessionId}`);
-          trackManagement.enableTrack(audio, true);
-          setIsMuted(false);
-          
-          // Republish audio track
-          await trackManagement.publishTrack(client, audio).catch(()=>{});
-          debugLog("✅ Successfully unmuted");
-        }
-      } else {
-        // Muting is always allowed
-        debugLog("🔇 Muting...");
-        await API.put(`/live/self-mute/${sessionId}`);
-        trackManagement.enableTrack(audio, false);
-        setIsMuted(true);
-        
-        // Unpublish audio track
-        await trackManagement.unpublishTrack(client, audio).catch(()=>{});
-        debugLog("✅ Successfully muted");
-      }
-    } catch (err) {
-      console.error("❌ Toggle mute failed:", err);
-    } finally {
-      setIsMuteLoading(false);
-    }
-  };
-
-  // Grant speaking permission with immediate effect
-  const grantSpeakingPermission = async (studentId) => {
-    try {
-      debugLog("Granting permission to:", studentId);
-      const response = await API.put(`/live/grant-speaking/${sessionId}/${studentId}`);
-
-      setPendingRequests(prev => prev.filter(req => req.studentId !== studentId));
-
-      if (response.data?.participant) {
-        const updated = response.data.participant;
-        const updatedId = String(updated.studentId);
-        setParticipants(prev => {
-          const exists = prev.some(p => String(p.studentId) === updatedId);
-          if (exists) {
-            return prev.map(p => String(p.studentId) === updatedId
-              ? { ...p,
-                  isMuted: updated.isMuted,
-                  hasSpeakingPermission: updated.hasSpeakingPermission,
-                  permissionRequested: updated.permissionRequested,
-                  role: updated.role
-                }
-              : p
-            );
-          } else {
-            return [...prev, {
-              studentId: updated.studentId,
-              isMuted: updated.isMuted,
-              hasSpeakingPermission: updated.hasSpeakingPermission,
-              permissionRequested: updated.permissionRequested,
-              role: updated.role
-            }];
-          }
-        });
-      } else {
-        const sessionResponse = await API.get(`/live/session/${sessionId}`);
-        if (sessionResponse.data.participants) setParticipants(sessionResponse.data.participants);
-      }
-
-      const currentUserId = localStorage.getItem("userId");
-      if (studentId === currentUserId) {
-        setHasSpeakingPermission(true);
-        setIsMuted(false);
-        if (localTracksRef.current.audio) {
-          trackManagement.enableTrack(localTracksRef.current.audio, true);
-          try {
-            await trackManagement.unpublishTrack(client, localTracksRef.current.audio);
-            await trackManagement.publishTrack(client, localTracksRef.current.audio);
-            debugLog("✅ Audio republished after permission grant (local user)");
-          } catch (err) {
-            console.error("Error republishing after grant:", err);
-          }
-        }
-      }
-
-      debugLog("Permission granted successfully");
-
-    } catch (err) {
-      console.error("❌ Grant permission failed:", err);
-    }
-  };
-
-  // ✅ FIX 3: Updated mute student - REMOVED client-side socket emit
+  // ✅ UPDATED: Mute student - REMOVED client-side socket emit
   const muteStudent = async (studentId) => {
     try {
       debugLog("🎯 Muting student:", studentId);
@@ -830,7 +708,7 @@ export default function LiveClass() {
     }
   };
 
-  // ✅ FIX 3: Updated unmute student - REMOVED client-side socket emit
+  // ✅ UPDATED: Unmute student - REMOVED client-side socket emit
   const unmuteStudent = async (studentId) => {
     try {
       debugLog("🎯 Unmuting student:", studentId);
@@ -858,7 +736,7 @@ export default function LiveClass() {
     }
   };
 
-  // ✅ FIX 3: Updated mute all students - REMOVED client-side socket emit
+  // ✅ UPDATED: Mute all students - REMOVED client-side socket emit
   const muteAllStudents = async () => {
     try {
       debugLog("🎯 Muting all students.");
@@ -875,7 +753,7 @@ export default function LiveClass() {
     }
   };
 
-  // ✅ FIX 3: Updated unmute all students - REMOVED client-side socket emit
+  // ✅ UPDATED: Unmute all students - REMOVED client-side socket emit
   const unmuteAllStudents = async () => {
     try {
       debugLog("Unmuting all students.");
@@ -930,7 +808,7 @@ export default function LiveClass() {
     }
   };
 
-  // ✅ FIX 2: IMPROVED Poll for session updates with guaranteed mute state sync
+  // ✅ UPDATED: Polling - remove permission sync
   const startSessionPolling = () => {
     debugLog("Starting session polling...");
     
@@ -955,9 +833,7 @@ export default function LiveClass() {
         const { 
           participants, 
           chatMessages, 
-          permissionRequests, 
-          isActive, 
-          userPermissions 
+          isActive
         } = response.data;
 
         if (isActive === false) {
@@ -980,18 +856,13 @@ export default function LiveClass() {
             return prev;
           });
         }
-        
-        if (userPermissions?.isTeacher && permissionRequests) {
-          const pending = permissionRequests.filter(req => req.status === "pending");
-          setPendingRequests(pending);
-        }
 
-        // ✅ FIX 2: CRITICAL - Always respect isMuted from polling as fallback
+        // ✅ UPDATED: Only sync mute state from server
         const currentUserId = String(localStorage.getItem("userId") || "");
         if (participants && currentUserId) {
           const currentParticipant = participants.find(p => String(p.studentId) === currentUserId);
           if (currentParticipant) {
-            // ✅ FIX 2: Always sync mute state from server (fallback for missed socket events)
+            // ✅ Only sync mute state from server (fallback for missed socket events)
             if (currentParticipant.isMuted !== isMuted) {
               debugLog(`🎯 Mute state changed via polling: ${isMuted} -> ${currentParticipant.isMuted}`);
               setIsMuted(currentParticipant.isMuted);
@@ -1007,12 +878,7 @@ export default function LiveClass() {
               }
             }
 
-            // Speaking permission update
-            if (currentParticipant.hasSpeakingPermission !== hasSpeakingPermission) {
-              setHasSpeakingPermission(currentParticipant.hasSpeakingPermission);
-            }
-
-            // hand raise
+            // ✅ KEEP: hand raise sync
             if (currentParticipant.isHandRaised !== isHandRaised) {
               setIsHandRaised(currentParticipant.isHandRaised);
             }
@@ -1048,15 +914,6 @@ export default function LiveClass() {
     }
   };
 
-  // Request speaking permission
-  const requestSpeakingPermission = async () => {
-    try {
-      await API.post(`/live/request-speaking/${sessionId}`);
-    } catch (err) {
-      console.error("Request speaking permission failed:", err);
-    }
-  };
-
   // Send chat message with input sanitization
   const sendMessage = async () => {
     if (!newMessage.trim()) return;
@@ -1067,14 +924,6 @@ export default function LiveClass() {
       setNewMessage("");
     } catch (err) {
       console.error("Send message failed:", err);
-    }
-  };
-
-  const revokeSpeakingPermission = async (studentId) => {
-    try {
-      await API.put(`/live/revoke-speaking/${sessionId}/${studentId}`);
-    } catch (err) {
-      console.error("Revoke permission failed:", err);
     }
   };
 
@@ -1366,9 +1215,6 @@ export default function LiveClass() {
     adjustRemoteAudioVolume(50);
   }, [remoteUsers]);
 
-  // ... REST OF THE COMPONENT REMAINS EXACTLY THE SAME ...
-  // (All the JSX rendering code is unchanged)
-
   return (
     <div className="min-h-screen bg-gray-900 text-white">
       {/* ✅ ADD Socket Connection Status Indicator */}
@@ -1526,22 +1372,6 @@ export default function LiveClass() {
             {isHandRaiseLoading ? "⏳" : (isHandRaised ? "✋" : "🤚")}
           </button>
 
-          {/* Permission Status */}
-          {!isTeacher && (
-            <div className={`px-2 py-1 rounded-full text-xs sm:text-sm ${
-              hasSpeakingPermission 
-                ? "bg-green-600" 
-                : "bg-yellow-600"
-            }`}>
-              <span className="hidden sm:inline">
-                {hasSpeakingPermission ? "🎤 Can Speak" : "⏳ Request Permission"}
-              </span>
-              <span className="sm:hidden">
-                {hasSpeakingPermission ? "🎤" : "⏳"}
-              </span>
-            </div>
-          )}
-
           <button
             onClick={leaveClass}
             className="bg-red-600 hover:bg-red-700 px-3 py-2 rounded text-sm transition-all"
@@ -1622,7 +1452,6 @@ export default function LiveClass() {
                 <div>Session Active: {sessionInfo?.isActive ? "✅ YES" : "❌ NO"}</div>
                 <div>Joined: {joined ? "✅ YES" : "❌ NO"}</div>
                 <div>Remote Users: {remoteUsers.length}</div>
-                <div>Has Speaking Permission: {hasSpeakingPermission ? "✅ YES" : "❌ NO"}</div>
                 <div>Socket Connected: {isSocketConnected ? "✅ YES" : "🔴 NO"}</div>
               </div>
             </div>
@@ -1704,37 +1533,7 @@ export default function LiveClass() {
                 </button>
               </div>
 
-              {/* Pending Permission Requests */}
-              {pendingRequests.length > 0 && (
-                <div className="mb-4">
-                  <h4 className="font-semibold mb-2">Pending Permission Requests</h4>
-                  <div className="space-y-2 max-h-32 overflow-y-auto">
-                    {pendingRequests.map((request) => (
-                      <div key={request.requestId} className="flex items-center justify-between bg-yellow-600 bg-opacity-20 p-2 rounded">
-                        <span className="text-sm truncate flex-1 mr-2">{request.studentName}</span>
-                        <div className="flex space-x-1">
-                          <button
-                            onClick={() => grantSpeakingPermission(request.studentId)}
-                            className="bg-green-600 hover:bg-green-700 px-2 py-1 rounded text-xs"
-                            aria-label={`Grant speaking permission to ${request.studentName}`}
-                          >
-                            Approve
-                          </button>
-                          <button
-                            onClick={() => revokeSpeakingPermission(request.studentId)}
-                            className="bg-red-600 hover:bg-red-700 px-2 py-1 rounded text-xs"
-                            aria-label={`Deny speaking permission to ${request.studentName}`}
-                          >
-                            Deny
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Participants List */}
+              {/* Participants List - UPDATED: Remove permission-related buttons */}
               <div>
                 <h4 className="font-semibold mb-2">Participants ({participants.length})</h4>
                 <div className="space-y-2 max-h-40 overflow-y-auto">
@@ -1744,12 +1543,6 @@ export default function LiveClass() {
                         <span className="truncate text-sm">{participant.name}</span>
                         {participant.isHandRaised && <span className="text-yellow-400 animate-pulse flex-shrink-0">✋</span>}
                         {participant.isMuted && <span className="text-red-400 flex-shrink-0">🔇</span>}
-                        {participant.hasSpeakingPermission && (
-                          <span className="text-green-400 flex-shrink-0" title="Can speak">🎤</span>
-                        )}
-                        {!participant.hasSpeakingPermission && participant.permissionRequested && (
-                          <span className="text-orange-400 animate-pulse flex-shrink-0" title="Permission requested">⏳</span>
-                        )}
                       </div>
                       <div className="flex space-x-1 flex-shrink-0">
                         <button
@@ -1768,15 +1561,6 @@ export default function LiveClass() {
                         >
                           Unmute
                         </button>
-                        {!participant.hasSpeakingPermission && (
-                          <button
-                            onClick={() => grantSpeakingPermission(participant.studentId)}
-                            className="bg-blue-600 hover:bg-blue-700 px-2 py-1 rounded text-xs"
-                            aria-label={`Grant microphone permission to ${participant.name}`}
-                          >
-                            Mic
-                          </button>
-                        )}
                       </div>
                     </div>
                   ))}
