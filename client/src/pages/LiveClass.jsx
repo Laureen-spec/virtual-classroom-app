@@ -385,9 +385,32 @@ export default function LiveClass() {
       
       debugLog("Tracks created");
 
-      // ORIGINAL WORKING TRACK SETUP
+      // ✅ EXACT REPLACEMENT: New track setup with mute state BEFORE publishing
       setLocalTracks({ audio: audioTrack, video: videoTrack });
       videoTrack.play("local-player");
+
+      // ✅ Get participant mute state from backend before publishing
+      const participant = session.participants.find(
+        (p) => p.studentId === user.id
+      );
+      const joinMuted = participant?.isMuted === true;
+
+      // ✅ Mute BEFORE publishing so student joins silent
+      if (joinMuted) {
+        console.log("🔇 Joining muted: disabling mic before publish...");
+        await audioTrack.setEnabled(false);
+        setIsMuted(true);
+      } else {
+        await audioTrack.setEnabled(true);
+        setIsMuted(false);
+      }
+
+      // ✅ Now publish (publishing a disabled mic keeps it silent)
+      await trackManagement.publishTrack(client, audioTrack);
+      await trackManagement.publishTrack(client, videoTrack);
+
+      // ✅ NOW start polling (AFTER tracks exist)
+      startSessionPolling();
 
       // Setup remote user handling with improved stability
       client.on("user-published", handleUserPublished);
@@ -414,12 +437,6 @@ export default function LiveClass() {
         debugLog("User left:", user.uid);
         setRemoteUsers((prev) => prev.filter((u) => u.uid !== user.uid));
       });
-
-      // ORIGINAL WORKING PUBLISH - Simple and direct
-      debugLog("Publishing audio and video tracks...");
-      await trackManagement.publishTrack(client, audioTrack);
-      await trackManagement.publishTrack(client, videoTrack);
-      debugLog("Tracks published successfully");
       
       setJoined(true);
 
@@ -436,9 +453,6 @@ export default function LiveClass() {
         
         debugLog("✅ Joined socket room after class join");
       }
-
-      // Start polling for session updates
-      startSessionPolling();
 
     } catch (err) {
       console.error("❌ Join failed:", err);

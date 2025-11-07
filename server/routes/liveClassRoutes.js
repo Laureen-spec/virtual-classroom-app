@@ -629,45 +629,27 @@ router.put("/revoke-speaking/:sessionId/:studentId", verifyToken, async (req, re
   }
 });
 
-// 🔹 Self-Mute (Student with speaking permission)
+// 🔹 Self-Mute (Student) — allow always (no speaking-permission required)
 router.put("/self-mute/:sessionId", verifyToken, async (req, res) => {
   try {
     const { sessionId } = req.params;
-
     const liveSession = await LiveSession.findById(sessionId);
-    if (!liveSession) {
-      return res.status(404).json({ message: "Live session not found" });
-    }
+    if (!liveSession) return res.status(404).json({ message: "Live session not found" });
 
-    // Find participant
     const participantIndex = liveSession.participants.findIndex(
       p => p.studentId.toString() === req.user.id
     );
+    if (participantIndex === -1) return res.status(404).json({ message: "You are not in this live session" });
 
-    if (participantIndex === -1) {
-      return res.status(404).json({ message: "You are not in this live session" });
-    }
-
-    const participant = liveSession.participants[participantIndex];
-
-    // Check if has speaking permission
-    if (!participant.hasSpeakingPermission) {
-      return res.status(403).json({ message: "You need speaking permission to self-mute" });
-    }
-
-    // Self-mute
+    // Allow student to mute themselves anytime
     liveSession.participants[participantIndex].isMuted = true;
-
+    // Keep speaking permission as-is (do NOT grant)
     await liveSession.save();
 
-    res.json({
-      message: "Self-muted successfully",
-      isMuted: true
-    });
-
+    return res.json({ message: "Self-muted successfully", isMuted: true });
   } catch (error) {
     console.error("Error self-muting:", error);
-    res.status(500).json({ message: "Failed to self-mute", error: error.message });
+    return res.status(500).json({ message: "Failed to self-mute", error: error.message });
   }
 });
 
