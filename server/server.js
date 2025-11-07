@@ -39,12 +39,28 @@ const app = express();
 // ✅ Create HTTP server
 const server = createServer(app);
 
-// ✅ Socket.io setup
+// ✅ Enhanced CORS configuration for multiple domains
+const allowedOrigins = [
+  "https://virtual-classroom-app-three.vercel.app",
+  "https://virtual-classroom-app-8wbh.onrender.com"
+];
+
+// ✅ Socket.io setup with enhanced CORS
 const io = new Server(server, {
   cors: {
-    origin: "https://virtual-classroom-app-three.vercel.app",
+    origin: (origin, callback) => {
+      // Allow requests with no origin (like mobile apps or curl requests)
+      if (!origin) return callback(null, true);
+      
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      } else {
+        console.log('❌ CORS blocked origin:', origin);
+        return callback(new Error("Not allowed by CORS"));
+      }
+    },
     methods: ["GET", "POST"],
-    credentials: true,
+    credentials: true
   },
 });
 
@@ -55,25 +71,28 @@ const activeSessions = new Map();
 io.on("connection", (socket) => {
   console.log(`🔌 New socket connected: ${socket.id}`);
 
-  // Join a live session room
+  // ✅ UPDATED: Join a live session room with string normalization
   socket.on("join-session", (data) => {
     const { sessionId, userId, userRole } = data;
-    
+
     socket.join(sessionId);
-    socket.sessionId = sessionId;
-    socket.userId = userId;
-    
-    // Store socket in active sessions
-    if (!activeSessions.has(sessionId)) {
-      activeSessions.set(sessionId, new Map());
+    socket.sessionId = String(sessionId);
+    socket.userId = String(userId);
+
+    // ✅ Normalize both keys to string
+    const sid = String(sessionId);
+    const uid = String(userId);
+
+    if (!activeSessions.has(sid)) {
+      activeSessions.set(sid, new Map());
     }
-    activeSessions.get(sessionId).set(userId, socket.id);
-    
-    console.log(`🎯 User ${userId} (${userRole}) joined session ${sessionId}`);
+    activeSessions.get(sid).set(uid, socket.id);
+
+    console.log(`🎯 User ${uid} (${userRole}) joined session ${sid}`);
     
     // Notify others in the session
-    socket.to(sessionId).emit("user-joined", {
-      userId,
+    socket.to(sid).emit("user-joined", {
+      userId: uid,
       userRole,
       socketId: socket.id,
       timestamp: new Date()
@@ -103,8 +122,8 @@ io.on("connection", (socket) => {
         await liveSession.save();
       }
 
-      // Find socket id for that user in this session
-      const sessionSockets = activeSessions.get(sessionId);
+      // ✅ UPDATED: Find socket id with string normalization
+      const sessionSockets = activeSessions.get(String(sessionId));
       const targetSocketId = sessionSockets ? sessionSockets.get(String(targetId)) : null;
 
       // Emit direct event to the target if online
@@ -158,8 +177,8 @@ io.on("connection", (socket) => {
         await liveSession.save();
       }
 
-      // Find socket id for that user in this session
-      const sessionSockets = activeSessions.get(sessionId);
+      // ✅ UPDATED: Find socket id with string normalization
+      const sessionSockets = activeSessions.get(String(sessionId));
       const targetSocketId = sessionSockets ? sessionSockets.get(String(targetId)) : null;
 
       // Emit direct event to the target if online
@@ -295,22 +314,26 @@ io.on("connection", (socket) => {
     }
   });
 
-  // Handle disconnection
+  // ✅ UPDATED: Handle disconnection with string normalization
   socket.on("disconnect", () => {
     console.log(`🔌 Socket disconnected: ${socket.id}`);
     
     if (socket.sessionId && socket.userId) {
-      const sessionSockets = activeSessions.get(socket.sessionId);
+      // ✅ Normalize both keys to string
+      const sid = String(socket.sessionId);
+      const uid = String(socket.userId);
+      
+      const sessionSockets = activeSessions.get(sid);
       if (sessionSockets) {
-        sessionSockets.delete(socket.userId);
+        sessionSockets.delete(uid);
         if (sessionSockets.size === 0) {
-          activeSessions.delete(socket.sessionId);
+          activeSessions.delete(sid);
         }
       }
       
       // Notify others in the session
-      socket.to(socket.sessionId).emit("user-left", {
-        userId: socket.userId,
+      socket.to(sid).emit("user-left", {
+        userId: uid,
         socketId: socket.id,
         timestamp: new Date()
       });
@@ -326,10 +349,20 @@ io.on("connection", (socket) => {
 // ✅ Make io available to routes
 app.set("io", io);
 
-// ✅ Middlewares (always before routes)
+// ✅ Enhanced CORS middleware for Express routes
 app.use(
   cors({
-    origin: "https://virtual-classroom-app-three.vercel.app",
+    origin: (origin, callback) => {
+      // Allow requests with no origin (like mobile apps or curl requests)
+      if (!origin) return callback(null, true);
+      
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      } else {
+        console.log('❌ Express CORS blocked origin:', origin);
+        return callback(new Error("Not allowed by CORS"));
+      }
+    },
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     credentials: true,
     allowedHeaders: ["Content-Type", "Authorization"],

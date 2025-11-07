@@ -183,7 +183,7 @@ export default function LiveClass() {
 
     const userId = localStorage.getItem("userId");
 
-    // ✅ REPLACED: Mute student handler - SIMPLIFIED AND DIRECT
+    // ✅ FIXED: Mute student handler - SIMPLIFIED AND DIRECT
     socket.on("mute-student", (data) => {
       debugLog("🔇 Received mute-student event:", data);
       
@@ -195,12 +195,12 @@ export default function LiveClass() {
         // ✅ PHYSICALLY TURN OFF MICROPHONE - Using localTracksRef
         if (localTracksRef.current.audio) {
           localTracksRef.current.audio.setEnabled(false);
-          console.log("🎤 Microphone disabled due to teacher mute");
+          console.log("🎤 Microphone disabled due to teacher mute (SOCKET)");
         }
       }
     });
 
-    // ✅ REPLACED: Unmute student handler - SIMPLIFIED AND DIRECT
+    // ✅ FIXED: Unmute student handler - SIMPLIFIED AND DIRECT
     socket.on("unmute-student", (data) => {
       debugLog("🎤 Received unmute-student event:", data);
       
@@ -212,7 +212,7 @@ export default function LiveClass() {
         // ✅ PHYSICALLY TURN MICROPHONE BACK ON - Using localTracksRef
         if (localTracksRef.current.audio) {
           localTracksRef.current.audio.setEnabled(true);
-          console.log("🎤 Microphone re-enabled due to teacher unmute");
+          console.log("🎤 Microphone re-enabled due to teacher unmute (SOCKET)");
         }
       }
     });
@@ -225,7 +225,7 @@ export default function LiveClass() {
         setIsMuted(true);
         if (localTracksRef.current.audio) {
           localTracksRef.current.audio.setEnabled(false);
-          debugLog("🔇 Microphone muted due to teacher's mute-all command");
+          debugLog("🔇 Microphone muted due to teacher's mute-all command (SOCKET)");
         }
       }
     });
@@ -238,7 +238,7 @@ export default function LiveClass() {
         setIsMuted(false);
         if (localTracksRef.current.audio) {
           localTracksRef.current.audio.setEnabled(true);
-          debugLog("🎤 Microphone unmuted due to teacher's unmute-all command");
+          debugLog("🎤 Microphone unmuted due to teacher's unmute-all command (SOCKET)");
         }
       }
     });
@@ -405,6 +405,11 @@ export default function LiveClass() {
       setLocalTracks({ audio: audioTrack, video: videoTrack });          // UI usage  
       videoTrack.play("local-player");
 
+      // ✅ FIX 1: Start polling only after local tracks exist
+      if (audioTrack && videoTrack) {
+        startSessionPolling();
+      }
+
       // ✅ Safely determine participant mute state BEFORE publishing
       // Prefer the fresh sessionResponse (fetched above). Fall back to joinResponse.session if available.
       const sessionData = sessionResponse?.data ?? session ?? {};
@@ -433,9 +438,6 @@ export default function LiveClass() {
       // ✅ Now publish (publishing a disabled mic keeps it silent)
       await trackManagement.publishTrack(client, audioTrack);
       await trackManagement.publishTrack(client, videoTrack);
-
-      // ✅ NOW start polling (AFTER tracks exist)
-      startSessionPolling();
 
       // Setup remote user handling with improved stability
       client.on("user-published", handleUserPublished);
@@ -791,20 +793,13 @@ export default function LiveClass() {
     }
   };
 
-  // ✅ ENHANCED: Mute student with Socket.io integration
+  // ✅ FIX 3: Updated mute student - REMOVED client-side socket emit
   const muteStudent = async (studentId) => {
     try {
       debugLog("🎯 Muting student:", studentId);
       
-      // ✅ Emit socket event for real-time mute
-      if (socket && isSocketConnected) {
-        socket.emit("mute-student", {
-          sessionId,
-          targetId: studentId,
-          teacherId: localStorage.getItem("userId")
-        });
-      }
-
+      // ✅ REMOVED: Client-side socket emit - let server handle it
+      // Only call API - server will handle socket broadcasting
       const response = await API.put(`/live/mute/${sessionId}/${studentId}`, { mute: true });
 
       if (response.data?.studentId) {
@@ -818,6 +813,7 @@ export default function LiveClass() {
         if (sessionResponse.data.participants) setParticipants(sessionResponse.data.participants);
       }
 
+      // ✅ Optional: Show success notification
       debugLog("Student muted successfully");
 
     } catch (err) {
@@ -825,20 +821,13 @@ export default function LiveClass() {
     }
   };
 
-  // ✅ ENHANCED: Unmute student with Socket.io integration
+  // ✅ FIX 3: Updated unmute student - REMOVED client-side socket emit
   const unmuteStudent = async (studentId) => {
     try {
       debugLog("🎯 Unmuting student:", studentId);
       
-      // ✅ Emit socket event for real-time unmute
-      if (socket && isSocketConnected) {
-        socket.emit("unmute-student", {
-          sessionId,
-          targetId: studentId,
-          teacherId: localStorage.getItem("userId")
-        });
-      }
-
+      // ✅ REMOVED: Client-side socket emit - let server handle it
+      // Only call API - server will handle socket broadcasting
       const response = await API.put(`/live/mute/${sessionId}/${studentId}`, { mute: false });
 
       if (response.data?.studentId) {
@@ -852,6 +841,7 @@ export default function LiveClass() {
         if (sessionResponse.data.participants) setParticipants(sessionResponse.data.participants);
       }
 
+      // ✅ Optional: Show success notification
       debugLog("Student unmuted successfully");
 
     } catch (err) {
@@ -859,19 +849,12 @@ export default function LiveClass() {
     }
   };
 
-  // ✅ ENHANCED: Mute all students with Socket.io integration
+  // ✅ FIX 3: Updated mute all students - REMOVED client-side socket emit
   const muteAllStudents = async () => {
     try {
       debugLog("🎯 Muting all students.");
       
-      // ✅ Emit socket event for real-time mute-all
-      if (socket && isSocketConnected) {
-        socket.emit("mute-all", {
-          sessionId,
-          teacherId: localStorage.getItem("userId")
-        });
-      }
-
+      // ✅ REMOVED: Client-side socket emit - let server handle it
       await API.put(`/live/mute-all/${sessionId}`);
 
       const sessionResponse = await API.get(`/live/session/${sessionId}`);
@@ -883,19 +866,12 @@ export default function LiveClass() {
     }
   };
 
-  // ✅ ENHANCED: Unmute all students with Socket.io integration
+  // ✅ FIX 3: Updated unmute all students - REMOVED client-side socket emit
   const unmuteAllStudents = async () => {
     try {
       debugLog("Unmuting all students.");
       
-      // ✅ Emit socket event for real-time unmute-all
-      if (socket && isSocketConnected) {
-        socket.emit("unmute-all", {
-          sessionId,
-          teacherId: localStorage.getItem("userId")
-        });
-      }
-
+      // ✅ REMOVED: Client-side socket emit - let server handle it
       await API.put(`/live/unmute-all/${sessionId}`);
 
       const sessionResponse = await API.get(`/live/session/${sessionId}`);
@@ -945,7 +921,7 @@ export default function LiveClass() {
     }
   };
 
-  // IMPROVED: Poll for session updates with better stability - FIXED MUTE HANDLING
+  // ✅ FIX 2: IMPROVED Poll for session updates with guaranteed mute state sync
   const startSessionPolling = () => {
     debugLog("Starting session polling...");
     
@@ -1001,12 +977,12 @@ export default function LiveClass() {
           setPendingRequests(pending);
         }
 
-        // CRITICAL FIX: Enhanced audio state management with immediate track control
+        // ✅ FIX 2: CRITICAL - Always respect isMuted from polling as fallback
         const currentUserId = String(localStorage.getItem("userId") || "");
         if (participants && currentUserId) {
           const currentParticipant = participants.find(p => String(p.studentId) === currentUserId);
           if (currentParticipant) {
-            // CRITICAL FIX: Handle mute state changes with immediate track control
+            // ✅ FIX 2: Always sync mute state from server (fallback for missed socket events)
             if (currentParticipant.isMuted !== isMuted) {
               debugLog(`🎯 Mute state changed via polling: ${isMuted} -> ${currentParticipant.isMuted}`);
               setIsMuted(currentParticipant.isMuted);
@@ -1014,10 +990,10 @@ export default function LiveClass() {
               if (localTracksRef.current.audio) {
                 if (currentParticipant.isMuted) {
                   trackManagement.enableTrack(localTracksRef.current.audio, false);
-                  debugLog("🎯 Audio disabled (muted via polling)");
+                  debugLog("🎯 Audio disabled (muted via polling - FALLBACK)");
                 } else {
                   trackManagement.enableTrack(localTracksRef.current.audio, true);
-                  debugLog("🎯 Audio enabled (unmuted via polling)");
+                  debugLog("🎯 Audio enabled (unmuted via polling - FALLBACK)");
                 }
               }
             }

@@ -703,7 +703,7 @@ router.put("/self-unmute/:sessionId", verifyToken, async (req, res) => {
   }
 });
 
-// 🔹 Enhanced Mute/Unmute Student (Teacher only) - FIXED WITH IMMEDIATE RESPONSE
+// 🔹 Enhanced Mute/Unmute Student (Teacher only) - WITH SOCKET INTEGRATION
 router.put("/mute/:sessionId/:studentId", verifyToken, async (req, res) => {
   try {
     const { sessionId, studentId } = req.params;
@@ -726,6 +726,7 @@ router.put("/mute/:sessionId/:studentId", verifyToken, async (req, res) => {
       p => p.studentId.toString() === studentId
     );
 
+    // ✅ FIX 2: Add guard clause for student not found
     if (participantIndex === -1) {
       return res.status(404).json({ message: "Student not found in this session" });
     }
@@ -762,6 +763,25 @@ router.put("/mute/:sessionId/:studentId", verifyToken, async (req, res) => {
 
     console.log(`✅ Student ${actionText} successfully:`, studentId);
 
+    // ✅ FIX 1: Get io instance and emit socket event after DB update
+    const io = req.app.get("io");
+    if (io) {
+      const activeSessions = req.app.get("activeSessions");
+      const sessionSockets = activeSessions ? activeSessions.get(String(sessionId)) : null;
+      const targetSocketId = sessionSockets ? sessionSockets.get(String(studentId)) : null;
+
+      if (targetSocketId) {
+        const eventName = mute ? "mute-student" : "unmute-student";
+        io.to(targetSocketId).emit(eventName, {
+          targetId: studentId,
+          teacherId: req.user.id,
+          message: `You have been ${actionText} by the teacher`,
+          timestamp: new Date()
+        });
+        console.log(`🔊 Socket event sent to ${targetSocketId}: ${eventName}`);
+      }
+    }
+
     // CRITICAL FIX: Return complete participant data for immediate frontend sync
     const updatedParticipant = liveSession.participants[participantIndex];
     
@@ -769,7 +789,7 @@ router.put("/mute/:sessionId/:studentId", verifyToken, async (req, res) => {
       message: `Student ${actionText} successfully`,
       studentId,
       isMuted: mute,
-      // CRITICAL: Include immediate participant data for frontend synchronization
+      // ✅ FIX 3: Return updated participant for immediate UI update
       participant: {
         studentId: updatedParticipant.studentId,
         isMuted: updatedParticipant.isMuted,
@@ -788,7 +808,7 @@ router.put("/mute/:sessionId/:studentId", verifyToken, async (req, res) => {
   }
 });
 
-// 🔹 Mute All Students (Teacher only) - FIXED TO MUTE ALL NON-HOSTS
+// 🔹 Mute All Students (Teacher only) - WITH SOCKET INTEGRATION
 router.put("/mute-all/:sessionId", verifyToken, async (req, res) => {
   try {
     const { sessionId } = req.params;
@@ -832,6 +852,17 @@ router.put("/mute-all/:sessionId", verifyToken, async (req, res) => {
 
     console.log(`✅ All students muted: ${mutedCount} participants affected`);
 
+    // ✅ FIX 1: Emit socket event for mute-all
+    const io = req.app.get("io");
+    if (io) {
+      io.to(sessionId).emit("mute-all", {
+        teacherId: req.user.id,
+        timestamp: new Date(),
+        message: "All students have been muted by the teacher"
+      });
+      console.log(`🔊 Socket event sent: mute-all to session ${sessionId}`);
+    }
+
     res.json({
       message: "All students muted successfully",
       mutedCount: mutedCount,
@@ -851,7 +882,7 @@ router.put("/mute-all/:sessionId", verifyToken, async (req, res) => {
   }
 });
 
-// 🔹 Unmute All Students (Teacher only) - FIXED WITH BETTER LOGIC
+// 🔹 Unmute All Students (Teacher only) - WITH SOCKET INTEGRATION
 router.put("/unmute-all/:sessionId", verifyToken, async (req, res) => {
   try {
     const { sessionId } = req.params;
@@ -894,6 +925,17 @@ router.put("/unmute-all/:sessionId", verifyToken, async (req, res) => {
     await liveSession.save();
 
     console.log(`✅ All students unmuted: ${unmutedCount} participants affected`);
+
+    // ✅ FIX 1: Emit socket event for unmute-all
+    const io = req.app.get("io");
+    if (io) {
+      io.to(sessionId).emit("unmute-all", {
+        teacherId: req.user.id,
+        timestamp: new Date(),
+        message: "All students have been unmuted by the teacher"
+      });
+      console.log(`🔊 Socket event sent: unmute-all to session ${sessionId}`);
+    }
 
     res.json({
       message: "All students unmuted successfully",
