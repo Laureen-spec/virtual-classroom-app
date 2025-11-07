@@ -177,14 +177,14 @@ export default function LiveClass() {
     };
   }, []);
 
-  // ✅ UPDATED: Socket.io event listeners for mute/unmute - SIMPLIFIED AND FIXED
+  // ✅ UPDATED: Enhanced Socket.io event listeners for mute/unmute with track publishing/unpublishing
   useEffect(() => {
     if (!socket) return;
 
     const userId = localStorage.getItem("userId");
 
-    // ✅ FIXED: Mute student handler - SIMPLIFIED AND DIRECT
-    socket.on("mute-student", (data) => {
+    // ✅ ENHANCED: Mute student handler with unpublishing
+    socket.on("mute-student", async (data) => {
       debugLog("🔇 Received mute-student event:", data);
       
       // Only apply to the targeted student
@@ -192,16 +192,17 @@ export default function LiveClass() {
         setIsMuted(true);
         setHasSpeakingPermission(false);
 
-        // ✅ PHYSICALLY TURN OFF MICROPHONE - Using localTracksRef
+        // ✅ PHYSICALLY TURN OFF MICROPHONE AND UNPUBLISH - Using localTracksRef
         if (localTracksRef.current.audio) {
-          localTracksRef.current.audio.setEnabled(false);
-          console.log("🎤 Microphone disabled due to teacher mute (SOCKET)");
+          await localTracksRef.current.audio.setEnabled(false);
+          await trackManagement.unpublishTrack(client, localTracksRef.current.audio);
+          console.log("🔇 Microphone disabled and unpublished due to teacher mute (SOCKET)");
         }
       }
     });
 
-    // ✅ FIXED: Unmute student handler - SIMPLIFIED AND DIRECT
-    socket.on("unmute-student", (data) => {
+    // ✅ ENHANCED: Unmute student handler with track recreation if needed
+    socket.on("unmute-student", async (data) => {
       debugLog("🎤 Received unmute-student event:", data);
       
       // Only apply to the targeted student
@@ -209,36 +210,58 @@ export default function LiveClass() {
         setIsMuted(false);
         setHasSpeakingPermission(true);
 
-        // ✅ PHYSICALLY TURN MICROPHONE BACK ON - Using localTracksRef
         if (localTracksRef.current.audio) {
-          localTracksRef.current.audio.setEnabled(true);
-          console.log("🎤 Microphone re-enabled due to teacher unmute (SOCKET)");
+          // ✅ Re-enable existing track and republish
+          await localTracksRef.current.audio.setEnabled(true);
+          await trackManagement.publishTrack(client, localTracksRef.current.audio);
+          console.log("🎤 Microphone re-enabled and republished after teacher unmute (SOCKET)");
+        } else {
+          // ✅ Safety: recreate and publish the track again if missing
+          try {
+            const [newAudioTrack] = await AgoraRTC.createMicrophoneAudioTrack({
+              AEC: true,
+              ANS: true, 
+              AGC: true,
+              encoderConfig: {
+                sampleRate: 48000,
+                stereo: false,
+                bitrate: 64
+              }
+            });
+            localTracksRef.current.audio = newAudioTrack;
+            await trackManagement.publishTrack(client, newAudioTrack);
+            console.log("🎤 New audio track created and published after unmute");
+          } catch (error) {
+            console.error("❌ Failed to create new audio track:", error);
+          }
         }
       }
     });
 
-    // ✅ PRESERVED: Listen for mute-all events
-    socket.on("mute-all", (data) => {
+    // ✅ ENHANCED: Mute-all with unpublishing
+    socket.on("mute-all", async (data) => {
       debugLog("🔇 Received mute-all event:", data);
       
       if (!isTeacher) { // Only affect students
         setIsMuted(true);
         if (localTracksRef.current.audio) {
-          localTracksRef.current.audio.setEnabled(false);
-          debugLog("🔇 Microphone muted due to teacher's mute-all command (SOCKET)");
+          await localTracksRef.current.audio.setEnabled(false);
+          await trackManagement.unpublishTrack(client, localTracksRef.current.audio);
+          debugLog("🔇 Microphone muted and unpublished due to teacher's mute-all command (SOCKET)");
         }
       }
     });
 
-    // ✅ PRESERVED: Listen for unmute-all events
-    socket.on("unmute-all", (data) => {
+    // ✅ ENHANCED: Unmute-all with republishing
+    socket.on("unmute-all", async (data) => {
       debugLog("🎤 Received unmute-all event:", data);
       
       if (!isTeacher && hasSpeakingPermission) {
         setIsMuted(false);
         if (localTracksRef.current.audio) {
-          localTracksRef.current.audio.setEnabled(true);
-          debugLog("🎤 Microphone unmuted due to teacher's unmute-all command (SOCKET)");
+          await localTracksRef.current.audio.setEnabled(true);
+          await trackManagement.publishTrack(client, localTracksRef.current.audio);
+          debugLog("🎤 Microphone unmuted and republished due to teacher's unmute-all command (SOCKET)");
         }
       }
     });
@@ -281,7 +304,7 @@ export default function LiveClass() {
     }
   }, [socket, isSocketConnected, joined, sessionId]);
 
-  // ✅ ENHANCED JOIN FUNCTION: Enhanced join function with comprehensive auth debug and mute state fix
+  // ✅ ENHANCED JOIN FUNCTION: Enhanced join function with auto-mute based on session settings
   const joinClass = async () => {
     try {
       setIsJoinLoading(true);
@@ -405,37 +428,23 @@ export default function LiveClass() {
       setLocalTracks({ audio: audioTrack, video: videoTrack });          // UI usage  
       videoTrack.play("local-player");
 
-      // ✅ FIX 1: Start polling only after local tracks exist
-      if (audioTrack && videoTrack) {
-        startSessionPolling();
-      }
-
-      // ✅ Safely determine participant mute state BEFORE publishing
-      // Prefer the fresh sessionResponse (fetched above). Fall back to joinResponse.session if available.
+      // ✅ NEW: Check if teacher's session requires auto-mute for students
       const sessionData = sessionResponse?.data ?? session ?? {};
-      const participantsList = sessionData.participants ?? [];
-
-      // get current user id in a safe way
-      const currentUserId = String(localStorage.getItem("userId") || (participantInfo ? participantInfo.studentId : "") || "");
-
-      // find participant safely
-      const participant = participantsList.find(
-        (p) => String(p.studentId) === currentUserId
-      );
-
-      const joinMuted = participant?.isMuted === true;
-
-      // ✅ Mute BEFORE publishing so student joins silent
-      if (joinMuted) {
-        console.log("🔇 Joining muted: disabling mic before publish...");
-        await audioTrack.setEnabled(false);
+      if (sessionData?.settings?.autoMuteNewStudents && !isUserTeacher) {
+        await audioTrack.setEnabled(false); // ✅ start muted
         setIsMuted(true);
+        console.log("🔇 Student joined muted by default (autoMuteNewStudents setting)");
       } else {
         await audioTrack.setEnabled(true);
         setIsMuted(false);
       }
 
-      // ✅ Now publish (publishing a disabled mic keeps it silent)
+      // ✅ FIX 1: Start polling only after local tracks exist
+      if (audioTrack && videoTrack) {
+        startSessionPolling();
+      }
+
+      // ✅ Now publish tracks (publishing a disabled mic keeps it silent)
       await trackManagement.publishTrack(client, audioTrack);
       await trackManagement.publishTrack(client, videoTrack);
 
@@ -1614,7 +1623,7 @@ export default function LiveClass() {
                 <div>Joined: {joined ? "✅ YES" : "❌ NO"}</div>
                 <div>Remote Users: {remoteUsers.length}</div>
                 <div>Has Speaking Permission: {hasSpeakingPermission ? "✅ YES" : "❌ NO"}</div>
-                <div>Socket Connected: {isSocketConnected ? "✅ YES" : "❌ NO"}</div>
+                <div>Socket Connected: {isSocketConnected ? "✅ YES" : "🔴 NO"}</div>
               </div>
             </div>
           )}
