@@ -90,6 +90,14 @@ io.on("connection", (socket) => {
 
     console.log(`🎯 User ${uid} (${userRole}) joined session ${sid}`);
     
+    // ✅ ADD: Emit participant update to all when user joins
+    io.to(sid).emit("participant-updated", {
+      studentId: userId,
+      userRole,
+      joined: true,
+      timestamp: new Date()
+    });
+    
     // Notify others in the session
     socket.to(sid).emit("user-joined", {
       userId: uid,
@@ -137,11 +145,10 @@ io.on("connection", (socket) => {
         console.log(`🔇 Sent mute-student to socket ${targetSocketId} for user ${targetId}`);
       }
 
-      // Also broadcast updated participant data to the whole room for sync
+      // ✅ ADD: Broadcast participant update with mute status
       io.in(sessionId).emit("participant-updated", {
         studentId: targetId,
         isMuted: true,
-        // ❌ REMOVED: hasSpeakingPermission: false,
         timestamp: new Date()
       });
 
@@ -192,11 +199,10 @@ io.on("connection", (socket) => {
         console.log(`🎤 Sent unmute-student to socket ${targetSocketId} for user ${targetId}`);
       }
 
-      // Also broadcast updated participant data to the whole room for sync
+      // ✅ ADD: Broadcast participant update with unmute status
       io.in(sessionId).emit("participant-updated", {
         studentId: targetId,
         isMuted: false,
-        // ❌ REMOVED: hasSpeakingPermission: true,
         timestamp: new Date()
       });
 
@@ -241,13 +247,12 @@ io.on("connection", (socket) => {
         message: "All students have been muted"
       });
 
-      // Broadcast participant updates for all muted students
+      // ✅ ADD: Broadcast participant updates for all muted students
       liveSession.participants.forEach(participant => {
         if (participant.role !== "host") {
           io.in(sessionId).emit("participant-updated", {
             studentId: participant.studentId,
             isMuted: true,
-            // ❌ REMOVED: hasSpeakingPermission: false,
             timestamp: new Date()
           });
         }
@@ -294,13 +299,12 @@ io.on("connection", (socket) => {
         message: "All students have been unmuted"
       });
 
-      // Broadcast participant updates for all unmuted students
+      // ✅ ADD: Broadcast participant updates for all unmuted students
       liveSession.participants.forEach(participant => {
         if (participant.role !== "host") {
           io.in(sessionId).emit("participant-updated", {
             studentId: participant.studentId,
             isMuted: false,
-            // ❌ REMOVED: hasSpeakingPermission: true,
             timestamp: new Date()
           });
         }
@@ -312,6 +316,95 @@ io.on("connection", (socket) => {
       console.error("Error in unmute-all:", error);
       socket.emit("error", { message: "Failed to unmute all students" });
     }
+  });
+
+  // ✅ ADD: Handle chat messages via socket for real-time updates
+  socket.on("send-chat-message", async (data) => {
+    const { sessionId, userId, userName, message, messageType = "user" } = data;
+    
+    try {
+      // Dynamic import to avoid circular dependencies
+      const LiveSession = (await import("./models/LiveSession.js")).default;
+      
+      const liveSession = await LiveSession.findById(sessionId);
+      if (!liveSession) {
+        socket.emit("error", { message: "Session not found" });
+        return;
+      }
+
+      // Create chat message object
+      const chatMessage = {
+        userId,
+        userName,
+        message,
+        messageType,
+        timestamp: new Date()
+      };
+
+      // Add to session's chat messages (limit to last 100 messages)
+      liveSession.chatMessages.push(chatMessage);
+      if (liveSession.chatMessages.length > 100) {
+        liveSession.chatMessages = liveSession.chatMessages.slice(-100);
+      }
+      await liveSession.save();
+
+      // ✅ ADD: Emit new chat message to all participants in real-time
+      io.to(sessionId).emit("new-chat-message", chatMessage);
+      
+      console.log(`💬 User ${userName} sent message in session ${sessionId}`);
+      
+    } catch (error) {
+      console.error("Error sending chat message:", error);
+      socket.emit("error", { message: "Failed to send message" });
+    }
+  });
+
+  // ✅ ADD: Handle hand raise events for real-time updates
+  socket.on("toggle-hand-raise", async (data) => {
+    const { sessionId, userId, isHandRaised } = data;
+    
+    try {
+      // Dynamic import to avoid circular dependencies
+      const LiveSession = (await import("./models/LiveSession.js")).default;
+      
+      const liveSession = await LiveSession.findById(sessionId);
+      if (!liveSession) {
+        socket.emit("error", { message: "Session not found" });
+        return;
+      }
+
+      // Update participant's hand raise status
+      const participantIndex = liveSession.participants.findIndex(
+        p => p.studentId.toString() === String(userId)
+      );
+      
+      if (participantIndex !== -1) {
+        liveSession.participants[participantIndex].isHandRaised = isHandRaised;
+        await liveSession.save();
+
+        // ✅ ADD: Emit participant update with hand raise status
+        io.in(sessionId).emit("participant-updated", {
+          studentId: userId,
+          isHandRaised: isHandRaised,
+          timestamp: new Date()
+        });
+
+        console.log(`✋ User ${userId} ${isHandRaised ? 'raised' : 'lowered'} hand in session ${sessionId}`);
+      }
+      
+    } catch (error) {
+      console.error("Error toggling hand raise:", error);
+      socket.emit("error", { message: "Failed to toggle hand raise" });
+    }
+  });
+
+  // ✅ ADD: Handle session updates (end session, etc.)
+  socket.on("session-updated", (data) => {
+    const { sessionId, updates } = data;
+    
+    // Broadcast session updates to all participants
+    io.to(sessionId).emit("session-updated", updates);
+    console.log(`🔄 Session ${sessionId} updated:`, updates);
   });
 
   // ✅ UPDATED: Handle disconnection with string normalization
@@ -330,6 +423,13 @@ io.on("connection", (socket) => {
           activeSessions.delete(sid);
         }
       }
+      
+      // ✅ ADD: Emit participant update when user leaves
+      socket.to(sid).emit("participant-updated", {
+        studentId: uid,
+        left: true,
+        timestamp: new Date()
+      });
       
       // Notify others in the session
       socket.to(sid).emit("user-left", {

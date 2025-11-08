@@ -185,6 +185,37 @@ export default function LiveClass() {
     };
   }, []);
 
+  // ✅ ADD: Socket-based real-time updates to reduce polling
+  useEffect(() => {
+    if (!socket) return;
+
+    // Real-time participant updates
+    socket.on("participant-updated", (data) => {
+      setParticipants(prev => prev.map(p => 
+        p.studentId === data.studentId ? { ...p, ...data } : p
+      ));
+    });
+
+    // Real-time chat messages
+    socket.on("new-chat-message", (message) => {
+      setChatMessages(prev => [...prev, message]);
+    });
+
+    // Real-time session updates
+    socket.on("session-updated", (sessionData) => {
+      if (sessionData.isActive === false) {
+        debugLog("Session ended via socket");
+        leaveClass();
+      }
+    });
+
+    return () => {
+      socket.off("participant-updated");
+      socket.off("new-chat-message");
+      socket.off("session-updated");
+    };
+  }, [socket]);
+
   // ✅ UPDATED: Enhanced Socket.io event listeners for consistent mute/unmute
   useEffect(() => {
     if (!socket) return;
@@ -323,7 +354,7 @@ export default function LiveClass() {
     }
   };
 
-  // ✅ UPDATED: Join function - remove permission checks
+  // ✅ OPTIMIZED: Reduced API calls on join
   const joinClass = async () => {
     try {
       setIsJoinLoading(true);
@@ -391,6 +422,7 @@ export default function LiveClass() {
         debugLog("🛠️ Admin bypassing media permissions check");
       }
 
+      // ✅ SINGLE API CALL for join (removed redundant session fetch)
       const joinResponse = await API.post(`/live/join/${sessionId}`);
       debugLog("Join response received");
       
@@ -413,9 +445,12 @@ export default function LiveClass() {
         currentParticipant.isMuted : 
         (participantInfo ? participantInfo.isMuted : true); // Default to muted if no info
       
+      // Use participantInfo directly instead of fetching session again
       setSessionInfo(session);
       setParticipantInfo(participantInfo);
-      setIsMuted(actualIsMuted); // ✅ Use actual current state
+      
+      // ✅ Use participantInfo for initial state instead of extra API call
+      setIsMuted(actualIsMuted);
       
       const isUserTeacher = participantInfo ? 
         (participantInfo.role === "host" || userRole === "teacher" || userRole === "admin") : 
@@ -448,29 +483,25 @@ export default function LiveClass() {
       setLocalTracks({ audio: audioTrack, video: videoTrack });          // UI usage  
       videoTrack.play("local-player");
 
-      // ✅ UPDATED: Check if teacher's session requires auto-mute for students
-      const sessionData = sessionResponse?.data ?? session ?? {};
-      if (sessionData?.settings?.autoMuteNewStudents && !isUserTeacher) {
-        // ✅ STUDENTS: Start with audio DISABLED and UNPUBLISHED
-        await audioTrack.setEnabled(false); // Physically disable audio
-        await trackManagement.unpublishTrack(client, audioTrack).catch(()=>{}); // Unpublish initially
-        setIsMuted(true);
-        console.log("🔇 Student joined muted by default - audio disabled and unpublished");
+      // ✅ OPTIMIZED: Use participantInfo for initial audio state
+      if (actualIsMuted) {
+        await audioTrack.setEnabled(false);
+        await trackManagement.unpublishTrack(client, audioTrack).catch(()=>{});
+        console.log("🔇 Joined muted - audio disabled");
       } else {
-        // ✅ TEACHERS/ADMINS: Start with audio ENABLED and PUBLISHED
         await audioTrack.setEnabled(true);
         await trackManagement.publishTrack(client, audioTrack).catch(()=>{});
-        setIsMuted(false);
-        console.log("🎤 Teacher/Admin joined unmuted - audio enabled and published");
+        console.log("🎤 Joined unmuted - audio enabled");
       }
 
-      // ✅ FIX 1: Start polling only after local tracks exist
-      if (audioTrack && videoTrack) {
-        startSessionPolling();
-      }
+      // ✅ DELAYED POLLING: Start polling only when truly needed
+      setTimeout(() => {
+        if (audioTrack && videoTrack) {
+          startSessionPolling();
+        }
+      }, 10000); // Start polling after 10 seconds
 
-      // ✅ Now publish tracks (publishing a disabled mic keeps it silent)
-      await trackManagement.publishTrack(client, audioTrack);
+      // Publish video track
       await trackManagement.publishTrack(client, videoTrack);
 
       // Setup remote user handling with improved stability
@@ -815,15 +846,32 @@ export default function LiveClass() {
     }
   };
 
-  // ✅ UPDATED: Polling - remove permission sync
+  // ✅ OPTIMIZED: Reduced polling and smart intervals
   const startSessionPolling = () => {
-    debugLog("Starting session polling...");
+    debugLog("Starting OPTIMIZED session polling...");
     
     let isPolling = false;
+    let pollCount = 0;
+    const MAX_POLLS = 50; // Limit total polls
+    const LONG_INTERVAL = 15000; // 15 seconds after first 2 minutes
+    const SHORT_INTERVAL = 5000; // 5 seconds initially
+    
+    let currentInterval = SHORT_INTERVAL;
     
     const interval = setInterval(async () => {
-      if (!sessionId || isPolling) {
+      if (!sessionId || isPolling || pollCount >= MAX_POLLS) {
+        if (pollCount >= MAX_POLLS) {
+          debugLog("🛑 Max polls reached, stopping polling");
+          clearInterval(interval);
+        }
         return;
+      }
+      
+      pollCount++;
+      
+      // Switch to longer interval after initial phase
+      if (pollCount > 24) { // After 2 minutes (24 * 5s = 120s)
+        currentInterval = LONG_INTERVAL;
       }
       
       isPolling = true;
@@ -837,70 +885,62 @@ export default function LiveClass() {
           return;
         }
 
-        const { 
-          participants, 
-          chatMessages, 
-          isActive
-        } = response.data;
+        const { participants, chatMessages, isActive } = response.data;
 
+        // Stop if session ended
         if (isActive === false) {
-          debugLog("Session has ended - stopping updates");
+          debugLog("Session has ended - stopping polling");
           clearInterval(interval);
           isPolling = false;
           return;
         }
         
+        // Only update if data actually changed
         if (participants && Array.isArray(participants)) {
-          setParticipants(participants);
+          setParticipants(prev => {
+            if (JSON.stringify(prev) !== JSON.stringify(participants)) {
+              return participants;
+            }
+            return prev;
+          });
         }
         
+        // Only update chat if new messages
         if (chatMessages && Array.isArray(chatMessages)) {
           setChatMessages(prev => {
             if (prev.length !== chatMessages.length) {
-              debugLog("Chat messages updated:", chatMessages.length);
+              debugLog("New chat messages detected:", chatMessages.length);
               return chatMessages;
             }
             return prev;
           });
         }
 
-        // ✅ UPDATED: Only sync mute state from server
+        // Sync mute state only when needed
         const currentUserId = String(localStorage.getItem("userId") || "");
         if (participants && currentUserId) {
           const currentParticipant = participants.find(p => String(p.studentId) === currentUserId);
-          if (currentParticipant) {
-            // ✅ Only sync mute state from server (fallback for missed socket events)
-            if (currentParticipant.isMuted !== isMuted) {
-              debugLog(`🎯 Mute state changed via polling: ${isMuted} -> ${currentParticipant.isMuted}`);
-              setIsMuted(currentParticipant.isMuted);
-              
-              if (localTracksRef.current.audio) {
-                if (currentParticipant.isMuted) {
-                  trackManagement.enableTrack(localTracksRef.current.audio, false);
-                  debugLog("🎯 Audio disabled (muted via polling - FALLBACK)");
-                } else {
-                  trackManagement.enableTrack(localTracksRef.current.audio, true);
-                  debugLog("🎯 Audio enabled (unmuted via polling - FALLBACK)");
-                }
-              }
-            }
-
-            // ✅ KEEP: hand raise sync
-            if (currentParticipant.isHandRaised !== isHandRaised) {
-              setIsHandRaised(currentParticipant.isHandRaised);
+          if (currentParticipant && currentParticipant.isMuted !== isMuted) {
+            debugLog(`Mute state sync via polling`);
+            setIsMuted(currentParticipant.isMuted);
+            
+            if (localTracksRef.current.audio) {
+              trackManagement.enableTrack(localTracksRef.current.audio, !currentParticipant.isMuted);
             }
           }
         }
 
       } catch (err) {
-        console.error("❌ Polling error:", err);
+        console.error("Polling error:", err);
+        // On error, increase interval to reduce load
+        currentInterval = 30000; // 30 seconds on error
       } finally {
         isPolling = false;
       }
-    }, 3000);
+    }, currentInterval);
 
     return () => {
-      debugLog("Clearing polling interval");
+      debugLog("Clearing optimized polling interval");
       clearInterval(interval);
     };
   };
@@ -1529,6 +1569,22 @@ export default function LiveClass() {
                   aria-label="Unmute all students"
                 >
                   Unmute All
+                </button>
+                {/* ✅ ADD: Manual refresh button */}
+                <button
+                  onClick={() => {
+                    // Manual refresh instead of constant polling
+                    API.get(`/live/session/${sessionId}`)
+                      .then(response => {
+                        if (response.data.participants) {
+                          setParticipants(response.data.participants);
+                        }
+                      })
+                      .catch(err => console.error("Manual refresh failed:", err));
+                  }}
+                  className="bg-blue-600 hover:bg-blue-700 px-3 py-2 rounded text-sm flex-1 min-w-[120px]"
+                >
+                  🔄 Refresh
                 </button>
                 {/* End Live Class - Using modal instead of window.confirm */}
                 <button
