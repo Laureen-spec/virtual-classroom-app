@@ -688,7 +688,7 @@ router.post("/chat/:sessionId", verifyToken, async (req, res) => {
   }
 });
 
-// 🔹 End Live Class (Teacher only)
+// 🔹 End Live Class (Teacher only) - UPDATED with socket emission
 router.put("/end/:sessionId", verifyToken, async (req, res) => {
   try {
     const { sessionId } = req.params;
@@ -705,6 +705,18 @@ router.put("/end/:sessionId", verifyToken, async (req, res) => {
     liveSession.isActive = false;
     liveSession.endTime = new Date();
     await liveSession.save();
+
+    // ✅ ADD: Get the socket.io instance and emit session end to all participants
+    const io = req.app.get("io");
+    if (io) {
+      io.to(sessionId).emit("session-ended", {
+        message: "Lesson has ended by teacher",
+        sessionId: sessionId,
+        endedBy: req.user.id,
+        timestamp: new Date()
+      });
+      console.log(`🛑 Session ${sessionId} ended - socket notification sent`);
+    }
 
     res.json({
       message: "Live class ended successfully",

@@ -71,6 +71,47 @@ const activeSessions = new Map();
 io.on("connection", (socket) => {
   console.log(`🔌 New socket connected: ${socket.id}`);
 
+  // ✅ ADD: Handle session end event with real-time broadcast
+  socket.on("end-session", async (data) => {
+    const { sessionId, teacherId } = data;
+    
+    try {
+      // Dynamic import to avoid circular dependencies
+      const LiveSession = (await import("./models/LiveSession.js")).default;
+      
+      const liveSession = await LiveSession.findById(sessionId);
+      if (!liveSession) {
+        socket.emit("error", { message: "Session not found" });
+        return;
+      }
+
+      // Verify the user ending the session is the teacher
+      if (liveSession.teacherId.toString() !== teacherId) {
+        socket.emit("error", { message: "Only teacher can end session" });
+        return;
+      }
+
+      // Update session to inactive
+      liveSession.isActive = false;
+      liveSession.endTime = new Date();
+      await liveSession.save();
+
+      // ✅ CRITICAL: Broadcast session end to ALL participants in real-time
+      io.to(sessionId).emit("session-ended", {
+        message: "Lesson has ended by teacher",
+        sessionId: sessionId,
+        endedBy: teacherId,
+        timestamp: new Date()
+      });
+
+      console.log(`🛑 Session ${sessionId} ended by teacher ${teacherId}`);
+
+    } catch (error) {
+      console.error("Error ending session:", error);
+      socket.emit("error", { message: "Failed to end session" });
+    }
+  });
+
   // ✅ Join a live session room with string normalization
   socket.on("join-session", (data) => {
     const { sessionId, userId, userRole } = data;
@@ -205,7 +246,7 @@ io.on("connection", (socket) => {
       const sid = String(socket.sessionId);
       const uid = String(socket.userId);
       
-      const sessionSockets = activeSockets.get(sid);
+      const sessionSockets = activeSessions.get(sid);
       if (sessionSockets) {
         sessionSockets.delete(uid);
         if (sessionSockets.size === 0) {

@@ -73,6 +73,88 @@ export default function LiveClass() {
     }
   };
 
+  // ✅ ADD: Listen for real-time session end events
+  useEffect(() => {
+    if (!socket || !isSocketConnected) return;
+
+    // Listen for session end event from server
+    socket.on("session-ended", (data) => {
+      console.log("🛑 Session ended via socket:", data);
+      
+      // Show message and redirect all users
+      alert("Lesson has ended by the teacher. You will be redirected.");
+      
+      // Leave the class and redirect
+      leaveClassWithRedirect();
+    });
+
+    return () => {
+      socket.off("session-ended");
+    };
+  }, [socket, isSocketConnected]);
+
+  // ✅ ADD: Separate function for leaving with redirect message
+  const leaveClassWithRedirect = async () => {
+    try {
+      // Stop screen sharing if active
+      if (isScreenSharing) {
+        await stopScreenShare();
+      }
+
+      // Clean up tracks
+      const audio = localTracksRef.current?.audio;
+      const video = localTracksRef.current?.video;
+
+      if (audio) {
+        await trackManagement.enableTrack(audio, false);
+        await trackManagement.unpublishTrack(client, audio).catch(() => {});
+        try { audio.close?.(); } catch (e) { console.warn("audio.close failed", e); }
+      }
+
+      if (video) {
+        await trackManagement.enableTrack(video, false);
+        await trackManagement.unpublishTrack(client, video).catch(() => {});
+        try { video.close?.(); } catch (e) { console.warn("video.close failed", e); }
+      }
+
+      // Clear refs/state
+      localTracksRef.current = { audio: null, video: null };
+      setLocalTracks({ audio: null, video: null });
+
+      await client.leave();
+      
+      // Disconnect socket
+      if (socket) {
+        socket.disconnect();
+      }
+
+      setJoined(false);
+      
+      // Redirect with message - you can customize this based on user role
+      const userRole = localStorage.getItem("role");
+      if (userRole === "teacher") {
+        navigate("/teacher", { 
+          state: { message: "You have ended the lesson successfully." } 
+        });
+      } else if (userRole === "admin") {
+        navigate("/admin", { 
+          state: { message: "Lesson has ended." } 
+        });
+      } else {
+        navigate("/student", { 
+          state: { message: "Lesson has ended by the teacher." } 
+        });
+      }
+
+    } catch (err) {
+      console.error("Leave with redirect failed:", err);
+      // Still redirect even if cleanup fails
+      navigate("/student", { 
+        state: { message: "Lesson has ended." } 
+      });
+    }
+  };
+
   // ✅ ADDED: Debug useEffect for auth state
   useEffect(() => {
     console.log("🔍 LiveClass Component Mounted - Auth State:", {
@@ -807,23 +889,49 @@ export default function LiveClass() {
     }
   };
 
-  // End Live Class Confirmed (Teacher only)
+  // ✅ UPDATED: End Live Class with Real-time Broadcast
   const endLiveClassConfirmed = async () => {
     try {
-      debugLog("Attempting to end class...");
-      const response = await API.put(`/live/end/${sessionId}`);
-      debugLog("Class ended successfully");
+      debugLog("Attempting to end class with real-time broadcast...");
       
+      // First, emit socket event to notify all participants
+      if (socket && isSocketConnected) {
+        socket.emit("end-session", {
+          sessionId: sessionId,
+          teacherId: localStorage.getItem("userId")
+        });
+      }
+
+      // Then call the API to update the session in database
+      const response = await API.put(`/live/end/${sessionId}`);
+      debugLog("Class ended successfully in database");
+      
+      // Show confirmation and redirect teacher
+      alert("Lesson has been ended for all students.");
+      
+      // Redirect teacher
       const userRole = localStorage.getItem("role");
       if (userRole === "teacher") {
-        navigate("/teacher");
+        navigate("/teacher", { 
+          state: { message: "You have ended the lesson successfully." } 
+        });
       } else if (userRole === "admin") {
-        navigate("/admin");
-      } else {
-        navigate("/student");
+        navigate("/admin", { 
+          state: { message: "Lesson has ended." } 
+        });
       }
+
     } catch (err) {
       console.error("❌ End live class failed:", err);
+      // Even if API fails, try to use socket to end session
+      if (socket && isSocketConnected) {
+        socket.emit("end-session", {
+          sessionId: sessionId,
+          teacherId: localStorage.getItem("userId")
+        });
+        alert("Lesson ended via real-time notification.");
+        navigate("/teacher");
+      }
     }
   };
 
