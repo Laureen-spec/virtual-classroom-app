@@ -1554,23 +1554,9 @@ export default function LiveClass() {
                 </div>
               </div>
 
-              {/* Quick Actions */}
+              {/* ✅ UPDATED: Quick Actions - Remove Mute/Unmute All buttons */}
               <div className="flex flex-wrap gap-2 mb-4">
-                <button
-                  onClick={muteAllStudents}
-                  className="bg-red-600 hover:bg-red-700 px-3 py-2 rounded text-sm flex-1 min-w-[120px]"
-                  aria-label="Mute all students"
-                >
-                  Mute All
-                </button>
-                <button
-                  onClick={unmuteAllStudents}
-                  className="bg-green-600 hover:bg-green-700 px-3 py-2 rounded text-sm flex-1 min-w-[120px]"
-                  aria-label="Unmute all students"
-                >
-                  Unmute All
-                </button>
-                {/* ✅ ADD: Manual refresh button */}
+                {/* Keep only these buttons - remove mute controls */}
                 <button
                   onClick={() => {
                     // Manual refresh instead of constant polling
@@ -1596,35 +1582,23 @@ export default function LiveClass() {
                 </button>
               </div>
 
-              {/* Participants List - UPDATED: Remove permission-related buttons */}
+              {/* ✅ UPDATED: Participants List - Remove mute/unmute buttons */}
               <div>
                 <h4 className="font-semibold mb-2">Participants ({participants.length})</h4>
                 <div className="space-y-2 max-h-40 overflow-y-auto">
                   {participants.map((participant) => (
+                    // ✅ REPLACE with Simple Status Display
                     <div key={participant.studentId} className="flex items-center justify-between bg-gray-700 p-2 rounded">
                       <div className="flex items-center space-x-2 flex-1 min-w-0">
-                        <span className="truncate text-sm">{participant.name}</span>
+                        <span className="truncate text-sm">
+                          {participant.name} 
+                          {participant.role === "host" && " 👨‍🏫"}
+                        </span>
                         {participant.isHandRaised && <span className="text-yellow-400 animate-pulse flex-shrink-0">✋</span>}
                         {participant.isMuted && <span className="text-red-400 flex-shrink-0">🔇</span>}
+                        {!participant.isMuted && participant.role !== "host" && <span className="text-green-400 flex-shrink-0">🎤</span>}
                       </div>
-                      <div className="flex space-x-1 flex-shrink-0">
-                        <button
-                          onClick={() => muteStudent(participant.studentId)}
-                          className="bg-red-600 hover:bg-red-700 px-2 py-1 rounded text-xs"
-                          disabled={participant.isMuted}
-                          aria-label={`Mute ${participant.name}`}
-                        >
-                          Mute
-                        </button>
-                        <button
-                          onClick={() => unmuteStudent(participant.studentId)}
-                          className="bg-green-600 hover:bg-green-700 px-2 py-1 rounded text-xs"
-                          disabled={!participant.isMuted}
-                          aria-label={`Unmute ${participant.name}`}
-                        >
-                          Unmute
-                        </button>
-                      </div>
+                      {/* ❌ NO BUTTONS - Just status indicators */}
                     </div>
                   ))}
                 </div>
