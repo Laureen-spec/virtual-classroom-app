@@ -6,49 +6,40 @@ import User from "../models/User.js";
 import { generateAgoraToken } from "../utils/agoraTokenGenerator.js";
 import agoraToken from "agora-token";
 
-// FIX: Define RtcRole directly from agora-token package
 const RtcRole = agoraToken.RtcRole;
 
 const router = express.Router();
 
+// ─────────────────────────────────────────────
 // 🔹 Start a live class (Teacher only)
+// ─────────────────────────────────────────────
 router.post("/start", verifyToken, async (req, res) => {
   try {
     const { classId } = req.body;
-    
-    // Check if user is a teacher
+
     if (req.user.role !== "teacher") {
       return res.status(403).json({ message: "Only teachers can start live classes" });
     }
 
-    // Find the class schedule
     const classSchedule = await ClassSchedule.findById(classId);
     if (!classSchedule) {
       return res.status(404).json({ message: "Class not found" });
     }
 
-    // Check if teacher owns this class
     if (classSchedule.teacher.toString() !== req.user.id) {
       return res.status(403).json({ message: "You can only start your own classes" });
     }
 
-    // Generate unique channel name
     const channelName = `class_${classId}_${Date.now()}`;
 
-    // Check if there's already an active session for this class
-    const existingSession = await LiveSession.findOne({ 
-      classId, 
-      isActive: true 
-    });
-
+    const existingSession = await LiveSession.findOne({ classId, isActive: true });
     if (existingSession) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         message: "A live session is already active for this class",
-        sessionId: existingSession._id 
+        sessionId: existingSession._id,
       });
     }
 
-    // Create new live session with enhanced settings
     const liveSession = new LiveSession({
       classId,
       teacherId: req.user.id,
@@ -59,27 +50,23 @@ router.post("/start", verifyToken, async (req, res) => {
         role: "host",
         isMuted: false,
         isHandRaised: false,
-        videoOn: false,
-        lastJoinTime: new Date()
+        videoOn: true,
+        lastJoinTime: new Date(),
       }],
-      settings: {
-        autoMuteNewStudents: true // All new students join muted
-      }
+      settings: { autoMuteNewStudents: true },
     });
 
     await liveSession.save();
 
-    // Generate Agora token for teacher (host)
+    // Teacher is always PUBLISHER (host)
     const token = generateAgoraToken(channelName, 0, RtcRole.PUBLISHER);
-
-    console.log("✅ Live class started - Token generated:", token ? "YES" : "NO");
 
     res.status(201).json({
       message: "Live class started successfully",
       sessionId: liveSession._id,
       channelName,
       token,
-      appId: process.env.VITE_AGORA_APP_ID
+      appId: process.env.VITE_AGORA_APP_ID,
     });
 
   } catch (error) {
@@ -88,29 +75,29 @@ router.post("/start", verifyToken, async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────
 // 🔹 Check if teacher can rejoin their live session
+// ─────────────────────────────────────────────
 router.get("/teacher-session/:classId", verifyToken, async (req, res) => {
   try {
     const { classId } = req.params;
 
-    // Check if user is a teacher
     if (req.user.role !== "teacher") {
       return res.status(403).json({ message: "Only teachers can check their sessions" });
     }
 
-    // Find active session for this class owned by the teacher
     const activeSession = await LiveSession.findOne({
       classId,
       teacherId: req.user.id,
-      isActive: true
+      isActive: true,
     })
-    .populate("classId", "title description")
-    .populate("teacherId", "name");
+      .populate("classId", "title description")
+      .populate("teacherId", "name");
 
     if (!activeSession) {
-      return res.status(404).json({ 
+      return res.status(404).json({
         message: "No active session found for this class",
-        hasActiveSession: false
+        hasActiveSession: false,
       });
     }
 
@@ -123,8 +110,8 @@ router.get("/teacher-session/:classId", verifyToken, async (req, res) => {
         channelName: activeSession.channelName,
         startTime: activeSession.startTime,
         participantCount: activeSession.participants.length,
-        allowTeacherRejoin: activeSession.allowTeacherRejoin
-      }
+        allowTeacherRejoin: activeSession.allowTeacherRejoin,
+      },
     });
 
   } catch (error) {
@@ -133,162 +120,91 @@ router.get("/teacher-session/:classId", verifyToken, async (req, res) => {
   }
 });
 
-// 🔹 Join a live class (Student/Teacher/Admin) - FIXED: Ensure proper initial audio state
+// ─────────────────────────────────────────────
+// 🔹 Join a live class
+//    Teacher/Admin → PUBLISHER (host)
+//    Student       → SUBSCRIBER (audience) — zero publishing cost
+//    Speaking student → promoted to PUBLISHER temporarily via /promote route
+// ─────────────────────────────────────────────
 router.post("/join/:sessionId", verifyToken, async (req, res) => {
   try {
     const { sessionId } = req.params;
-    
-    console.log("🔹 JOIN ATTEMPT - User Info:", {
-      userId: req.user.id,
-      userRole: req.user.role,
-      userEmail: req.user.email,
-      sessionId: sessionId,
-      timestamp: new Date().toISOString()
-    });
 
-    // ✅ ADD THIS DEBUG TO VERIFY ADMIN DATA
+    // Admin verification
     if (req.user.role === "admin") {
-      console.log("🎯 ADMIN JOIN - Database User:", {
-        id: req.user.id,
-        email: req.user.email, 
-        name: req.user.name,
-        role: req.user.role
-      });
-    }
-
-    // ✅ ADD THIS DEBUG TO SEE IF ADMIN REACHES HERE
-    if (req.user.role === "admin") {
-      console.log("🎯 ADMIN JOIN REACHED BACKEND - Token verification passed!");
-    }
-
-    // ✅ CRITICAL FIX: Handle admin with null userId in localStorage
-    if (req.user.role === "admin") {
-      console.log("🛠️ ADMIN JOIN DETECTED - User ID from token:", req.user.id);
-      
-      // Find admin user to get complete info
       const adminUser = await User.findById(req.user.id);
       if (!adminUser) {
         return res.status(404).json({ message: "Admin user not found in database" });
       }
-      
-      console.log("✅ Admin verified in database:", {
-        name: adminUser.name,
-        email: adminUser.email,
-        role: adminUser.role
-      });
     }
 
-    // Find the live session
     const liveSession = await LiveSession.findById(sessionId)
       .populate("classId", "title description")
       .populate("teacherId", "name");
 
     if (!liveSession) {
-      console.log("❌ Live session not found:", sessionId);
       return res.status(404).json({ message: "Live session not found" });
     }
 
     if (!liveSession.isActive) {
-      console.log(`❌ Session ${sessionId} is not active. isActive: ${liveSession.isActive}`);
-      return res.status(400).json({ 
+      return res.status(400).json({
         message: "This live session has ended",
-        details: {
-          isActive: liveSession.isActive,
-          endTime: liveSession.endTime,
-          sessionId: liveSession._id
-        }
+        details: { isActive: false, endTime: liveSession.endTime, sessionId: liveSession._id },
       });
     }
 
-    console.log("✅ Session found and active:", {
-      sessionTitle: liveSession.sessionTitle,
-      teacherId: liveSession.teacherId._id.toString(),
-      teacherName: liveSession.teacherId.name,
-      channelName: liveSession.channelName
-    });
-
-    // Check if user is already a participant
     const existingParticipant = liveSession.participants.find(
-      p => p.studentId.toString() === req.user.id
+      (p) => p.studentId.toString() === req.user.id
     );
 
-    let role = RtcRole.SUBSCRIBER;
-    let isMuted = liveSession.settings.autoMuteNewStudents;
+    // ── Role assignment ──────────────────────────────────────────────────────
+    // Teacher and admin are PUBLISHER (host). Everyone else is SUBSCRIBER (audience).
+    // In Agora Live Streaming mode, SUBSCRIBER audience members consume
+    // dramatically fewer minutes than PUBLISHER peers.
+    const isHost =
+      req.user.role === "admin" ||
+      (req.user.role === "teacher" && liveSession.teacherId._id.toString() === req.user.id);
 
-    // ✅ FIXED: PROPER INITIAL STATE HANDLING
-    if (req.user.role === "admin") {
-      role = RtcRole.PUBLISHER;
-      isMuted = false;
-      console.log("🔧 ADMIN joining with FULL HOST privileges");
-    }
-    // Teacher joins as host
-    else if (req.user.role === "teacher" && liveSession.teacherId._id.toString() === req.user.id) {
-      role = RtcRole.PUBLISHER;
-      isMuted = false;
-      console.log("👨‍🏫 Teacher joining with host privileges");
-      
-      // Reset leftAt time when teacher rejoins
-      if (existingParticipant && existingParticipant.leftAt) {
-        existingParticipant.leftAt = null;
-        existingParticipant.lastJoinTime = new Date();
-        
-        // Add system message for teacher rejoin
-        const teacher = await User.findById(req.user.id);
-        liveSession.chatMessages.push({
-          userId: req.user.id,
-          userName: teacher.name,
-          message: `${teacher.name} rejoined the session`,
-          messageType: "system"
-        });
-      }
-    } else {
-      // ✅ CRITICAL FIX: Students join muted but CAN SELF-UNMUTE WITHOUT PERMISSION
-      isMuted = true; // Students always join muted
-      console.log("🎓 Student joining muted but can self-unmute freely");
-    }
+    const agoraRole = isHost ? RtcRole.PUBLISHER : RtcRole.SUBSCRIBER;
+    const isMuted = !isHost; // audience start muted (they have no mic track anyway)
 
-    // Add user to participants if not already added
+    // ── Participant record ───────────────────────────────────────────────────
     if (!existingParticipant) {
-      const newParticipant = {
+      liveSession.participants.push({
         studentId: req.user.id,
-        role: req.user.role === "teacher" || req.user.role === "admin" ? "host" : "audience",
+        role: isHost ? "host" : "audience",
         isMuted,
         isHandRaised: false,
         lastJoinTime: new Date(),
-        videoOn: req.user.role === "admin" ? true : false
-      };
-      
-      liveSession.participants.push(newParticipant);
-      console.log("✅ Added new participant:", {
-        userId: req.user.id,
-        role: newParticipant.role,
-        isMuted: newParticipant.isMuted
+        videoOn: isHost,
       });
     } else {
       existingParticipant.lastJoinTime = new Date();
-      // ✅ FIXED: Admin role update without permission
-      if (req.user.role === "admin") {
+      existingParticipant.leftAt = null;
+
+      if (isHost) {
         existingParticipant.role = "host";
         existingParticipant.isMuted = false;
         existingParticipant.videoOn = true;
-        console.log("✅ Updated existing admin participant with HOST privileges");
+
+        // System message when teacher rejoins
+        if (req.user.role === "teacher") {
+          const teacher = await User.findById(req.user.id);
+          liveSession.chatMessages.push({
+            userId: req.user.id,
+            userName: teacher.name,
+            message: `${teacher.name} rejoined the session`,
+            messageType: "system",
+          });
+        }
       }
-      console.log("✅ Updated existing participant:", {
-        userId: req.user.id,
-        role: existingParticipant.role,
-        isMuted: existingParticipant.isMuted
-      });
     }
 
     await liveSession.save();
 
-    // Generate Agora token
-    const token = generateAgoraToken(liveSession.channelName, 0, role);
+    const token = generateAgoraToken(liveSession.channelName, 0, agoraRole);
 
-    console.log(`✅ ${req.user.role.toUpperCase()} joined live class successfully - Token generated:`, token ? "YES" : "NO");
-
-    // Prepare response data
-    const responseData = {
+    res.json({
       message: `${req.user.role.charAt(0).toUpperCase() + req.user.role.slice(1)} joined live class successfully`,
       session: {
         id: liveSession._id,
@@ -297,83 +213,143 @@ router.post("/join/:sessionId", verifyToken, async (req, res) => {
         teacherName: liveSession.teacherId.name,
         className: liveSession.classId.title,
         classDescription: liveSession.classId.description,
-        isHost: role === RtcRole.PUBLISHER,
-        settings: liveSession.settings
+        isHost,
+        settings: liveSession.settings,
       },
       participantInfo: {
         isMuted,
-        role: req.user.role === "teacher" || req.user.role === "admin" ? "host" : "audience",
-        videoOn: req.user.role === "admin" ? true : false
+        role: isHost ? "host" : "audience",
+        videoOn: isHost,
+        // Tell the frontend which Agora client role to set
+        clientRole: isHost ? "host" : "audience",
       },
       token,
       appId: process.env.VITE_AGORA_APP_ID,
-      accessType: "free"
-    };
-
-    console.log("📤 Sending join response:", {
-      userId: req.user.id,
-      userRole: req.user.role,
-      isHost: responseData.session.isHost,
-      isMuted: responseData.participantInfo.isMuted
+      accessType: "free",
     });
-
-    res.json(responseData);
 
   } catch (error) {
-    console.error("❌ Error joining live class:", {
-      error: error.message,
-      stack: error.stack,
-      userId: req.user?.id,
-      userRole: req.user?.role,
-      sessionId: sessionId,
-      timestamp: new Date().toISOString()
-    });
-    res.status(500).json({ 
-      message: "Failed to join live class", 
-      error: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
-    });
+    console.error("❌ Error joining live class:", error.message);
+    res.status(500).json({ message: "Failed to join live class", error: error.message });
   }
 });
 
-// 🔹 Toggle Video On/Off
-router.put("/video/:sessionId", verifyToken, async (req, res) => {
+// ─────────────────────────────────────────────
+// 🔹 Promote student to speaker (Teacher only)
+//    Emits a socket event so the student's client can switch to host role
+//    and create/publish a mic track — consuming minutes only while speaking
+// ─────────────────────────────────────────────
+router.post("/promote/:sessionId", verifyToken, async (req, res) => {
   try {
     const { sessionId } = req.params;
-    const { videoOn } = req.body; // true or false
+    const { studentId } = req.body;
 
     const liveSession = await LiveSession.findById(sessionId);
-    if (!liveSession) {
-      return res.status(404).json({ message: "Live session not found" });
+    if (!liveSession) return res.status(404).json({ message: "Live session not found" });
+
+    if (liveSession.teacherId.toString() !== req.user.id) {
+      return res.status(403).json({ message: "Only the teacher can promote students" });
     }
 
-    // Find participant
-    const participantIndex = liveSession.participants.findIndex(
-      p => p.studentId.toString() === req.user.id
+    const participant = liveSession.participants.find(
+      (p) => p.studentId.toString() === studentId
     );
+    if (!participant) return res.status(404).json({ message: "Student not in session" });
 
-    if (participantIndex === -1) {
-      return res.status(404).json({ message: "You are not in this session" });
-    }
+    participant.isMuted = false;
+    participant.hasSpeakingPermission = true;
 
-    liveSession.participants[participantIndex].videoOn = videoOn;
-
-    // Add system message
-    const user = await User.findById(req.user.id);
-    const actionText = videoOn ? "turned ON video" : "turned OFF video";
+    const student = await User.findById(studentId);
     liveSession.chatMessages.push({
       userId: req.user.id,
-      userName: user.name,
-      message: `${user.name} ${actionText}`,
-      messageType: "system"
+      userName: student.name,
+      message: `${student.name} was given permission to speak`,
+      messageType: "permission_granted",
     });
 
     await liveSession.save();
 
-    res.json({
-      message: `Video ${videoOn ? "enabled" : "disabled"} successfully`,
-      videoOn
-    });
+    // Generate a short-lived PUBLISHER token for the promoted student
+    const speakerToken = generateAgoraToken(liveSession.channelName, 0, RtcRole.PUBLISHER);
+
+    // Emit via socket so the student's client switches role immediately
+    const io = req.app.get("io");
+    if (io) {
+      io.to(sessionId).emit("student-promoted", {
+        studentId,
+        speakerToken,
+        channelName: liveSession.channelName,
+      });
+    }
+
+    res.json({ message: "Student promoted to speaker", speakerToken });
+
+  } catch (error) {
+    console.error("Error promoting student:", error);
+    res.status(500).json({ message: "Failed to promote student", error: error.message });
+  }
+});
+
+// ─────────────────────────────────────────────
+// 🔹 Demote student back to audience (Teacher only)
+// ─────────────────────────────────────────────
+router.post("/demote/:sessionId", verifyToken, async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const { studentId } = req.body;
+
+    const liveSession = await LiveSession.findById(sessionId);
+    if (!liveSession) return res.status(404).json({ message: "Live session not found" });
+
+    if (liveSession.teacherId.toString() !== req.user.id) {
+      return res.status(403).json({ message: "Only the teacher can demote students" });
+    }
+
+    const participant = liveSession.participants.find(
+      (p) => p.studentId.toString() === studentId
+    );
+    if (!participant) return res.status(404).json({ message: "Student not in session" });
+
+    participant.isMuted = true;
+    participant.hasSpeakingPermission = false;
+    participant.isHandRaised = false;
+
+    await liveSession.save();
+
+    // Tell the student's client to switch back to audience role
+    const io = req.app.get("io");
+    if (io) {
+      io.to(sessionId).emit("student-demoted", { studentId });
+    }
+
+    res.json({ message: "Student returned to audience" });
+
+  } catch (error) {
+    console.error("Error demoting student:", error);
+    res.status(500).json({ message: "Failed to demote student", error: error.message });
+  }
+});
+
+// ─────────────────────────────────────────────
+// 🔹 Toggle Video On/Off (host only — students are audience, no video)
+// ─────────────────────────────────────────────
+router.put("/video/:sessionId", verifyToken, async (req, res) => {
+  try {
+    const { sessionId } = req.params;
+    const { videoOn } = req.body;
+
+    const liveSession = await LiveSession.findById(sessionId);
+    if (!liveSession) return res.status(404).json({ message: "Live session not found" });
+
+    const participantIndex = liveSession.participants.findIndex(
+      (p) => p.studentId.toString() === req.user.id
+    );
+    if (participantIndex === -1) return res.status(404).json({ message: "You are not in this session" });
+
+    liveSession.participants[participantIndex].videoOn = videoOn;
+    await liveSession.save();
+
+    res.json({ message: `Video ${videoOn ? "enabled" : "disabled"} successfully`, videoOn });
 
   } catch (error) {
     console.error("Error toggling video:", error);
@@ -381,9 +357,9 @@ router.put("/video/:sessionId", verifyToken, async (req, res) => {
   }
 });
 
-// ✅ KEEP THESE - Students control their own audio
-
-// 🔹 Self-Mute (Student) — allow always (SIMPLIFIED)
+// ─────────────────────────────────────────────
+// 🔹 Self-Mute — audience members can always mute themselves
+// ─────────────────────────────────────────────
 router.put("/self-mute/:sessionId", verifyToken, async (req, res) => {
   try {
     const { sessionId } = req.params;
@@ -391,11 +367,10 @@ router.put("/self-mute/:sessionId", verifyToken, async (req, res) => {
     if (!liveSession) return res.status(404).json({ message: "Live session not found" });
 
     const participantIndex = liveSession.participants.findIndex(
-      p => p.studentId.toString() === req.user.id
+      (p) => p.studentId.toString() === req.user.id
     );
     if (participantIndex === -1) return res.status(404).json({ message: "You are not in this live session" });
 
-    // ✅ ALLOW student to mute themselves anytime
     liveSession.participants[participantIndex].isMuted = true;
     await liveSession.save();
 
@@ -406,34 +381,38 @@ router.put("/self-mute/:sessionId", verifyToken, async (req, res) => {
   }
 });
 
-// 🔹 Self-Unmute (Student) — allow always WITHOUT PERMISSION
+// ─────────────────────────────────────────────
+// 🔹 Self-Unmute — only allowed if student has speaking permission
+//    (i.e. teacher has promoted them via /promote)
+// ─────────────────────────────────────────────
 router.put("/self-unmute/:sessionId", verifyToken, async (req, res) => {
   try {
     const { sessionId } = req.params;
-
     const liveSession = await LiveSession.findById(sessionId);
-    if (!liveSession) {
-      return res.status(404).json({ message: "Live session not found" });
-    }
+    if (!liveSession) return res.status(404).json({ message: "Live session not found" });
 
-    // Find participant
     const participantIndex = liveSession.participants.findIndex(
-      p => p.studentId.toString() === req.user.id
+      (p) => p.studentId.toString() === req.user.id
     );
+    if (participantIndex === -1) return res.status(404).json({ message: "You are not in this live session" });
 
-    if (participantIndex === -1) {
-      return res.status(404).json({ message: "You are not in this live session" });
+    const participant = liveSession.participants[participantIndex];
+
+    // Teachers/admins can always unmute themselves
+    const isHost =
+      req.user.role === "admin" ||
+      liveSession.teacherId.toString() === req.user.id;
+
+    if (!isHost && !participant.hasSpeakingPermission) {
+      return res.status(403).json({
+        message: "You need speaking permission from the teacher first",
+      });
     }
 
-    // ✅ ALLOW self-unmute without permission check
-    liveSession.participants[participantIndex].isMuted = false;
-
+    participant.isMuted = false;
     await liveSession.save();
 
-    res.json({
-      message: "Self-unmuted successfully",
-      isMuted: false
-    });
+    res.json({ message: "Self-unmuted successfully", isMuted: false });
 
   } catch (error) {
     console.error("Error self-unmuting:", error);
@@ -441,33 +420,27 @@ router.put("/self-unmute/:sessionId", verifyToken, async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────
 // 🔹 Update Session Settings (Teacher only)
+// ─────────────────────────────────────────────
 router.put("/settings/:sessionId", verifyToken, async (req, res) => {
   try {
     const { sessionId } = req.params;
     const { autoMuteNewStudents } = req.body;
 
     const liveSession = await LiveSession.findById(sessionId);
-    if (!liveSession) {
-      return res.status(404).json({ message: "Live session not found" });
-    }
+    if (!liveSession) return res.status(404).json({ message: "Live session not found" });
 
-    // Check if user is teacher and owns the session
     if (liveSession.teacherId.toString() !== req.user.id) {
       return res.status(403).json({ message: "Only the teacher can update session settings" });
     }
 
-    // Update settings
-    if (typeof autoMuteNewStudents === 'boolean') {
+    if (typeof autoMuteNewStudents === "boolean") {
       liveSession.settings.autoMuteNewStudents = autoMuteNewStudents;
     }
 
     await liveSession.save();
-
-    res.json({
-      message: "Session settings updated successfully",
-      settings: liveSession.settings
-    });
+    res.json({ message: "Session settings updated successfully", settings: liveSession.settings });
 
   } catch (error) {
     console.error("Error updating session settings:", error);
@@ -475,16 +448,13 @@ router.put("/settings/:sessionId", verifyToken, async (req, res) => {
   }
 });
 
-// 🔹 Enhanced Get Session Info - UPDATED: Remove permission data
+// ─────────────────────────────────────────────
+// 🔹 Get Session Info
+// ─────────────────────────────────────────────
 router.get("/session/:sessionId", verifyToken, async (req, res) => {
   try {
     const { sessionId } = req.params;
     const { page = 1, limit = 50 } = req.query;
-
-    console.log("🔍 DEBUG: Fetching session info for:", sessionId);
-    console.log("🔍 DEBUG: Request user ID:", req.user.id);
-    console.log("🔍 DEBUG: Request user role:", req.user.role);
-    console.log("🔍 DEBUG: Pagination params - page:", page, "limit:", limit);
 
     const liveSession = await LiveSession.findById(sessionId)
       .populate("classId", "title description")
@@ -492,47 +462,23 @@ router.get("/session/:sessionId", verifyToken, async (req, res) => {
       .populate("participants.studentId", "name role")
       .populate("chatMessages.userId", "name");
 
-    if (!liveSession) {
-      console.log("❌ Session not found:", sessionId);
-      return res.status(404).json({ message: "Live session not found" });
-    }
+    if (!liveSession) return res.status(404).json({ message: "Live session not found" });
 
-    console.log("🔍 DEBUG: Session found - isActive:", liveSession.isActive);
-    console.log("🔍 DEBUG: Teacher ID:", liveSession.teacherId._id.toString());
-    console.log("🔍 DEBUG: Request user ID:", req.user.id);
-    console.log("🔍 DEBUG: Is user teacher?", liveSession.teacherId._id.toString() === req.user.id);
-
-    // Check if current user is the teacher
     const isUserTeacher = liveSession.teacherId._id.toString() === req.user.id;
     const isUserAdmin = req.user.role === "admin";
 
-    console.log("🔍 DEBUG: User is teacher:", isUserTeacher);
-    console.log("🔍 DEBUG: User is admin:", isUserAdmin);
-
-    // Calculate pagination for chat messages
     const totalMessages = liveSession.chatMessages.length;
     const pageNum = parseInt(page);
     const limitNum = parseInt(limit);
     const startIndex = (pageNum - 1) * limitNum;
     const endIndex = pageNum * limitNum;
-    
-    // Sort messages by timestamp (newest first) and paginate
+
     const paginatedMessages = liveSession.chatMessages
       .slice()
       .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
       .slice(startIndex, endIndex);
 
-    console.log("🔍 DEBUG: Chat pagination -", {
-      totalMessages,
-      page: pageNum,
-      limit: limitNum,
-      startIndex,
-      endIndex,
-      returnedMessages: paginatedMessages.length
-    });
-
-    // ✅ FIXED: Ensure isActive is properly set in response
-    const responseData = {
+    res.json({
       session: {
         _id: liveSession._id,
         classId: liveSession.classId,
@@ -543,33 +489,35 @@ router.get("/session/:sessionId", verifyToken, async (req, res) => {
         startTime: liveSession.startTime,
         endTime: liveSession.endTime,
         settings: liveSession.settings,
-        recording: liveSession.recording
+        recording: liveSession.recording,
       },
-      participants: liveSession.participants.map(p => ({
+      participants: liveSession.participants.map((p) => ({
         studentId: p.studentId._id,
         name: p.studentId.name,
         role: p.studentId.role,
+        sessionRole: p.role, // "host" or "audience"
         isHandRaised: p.isHandRaised,
         isMuted: p.isMuted,
         videoOn: p.videoOn,
+        hasSpeakingPermission: p.hasSpeakingPermission,
         totalTimeSpent: p.totalTimeSpent,
         lastJoinTime: p.lastJoinTime,
         joinedAt: p.joinedAt,
-        isScreenSharing: p.isScreenSharing
+        isScreenSharing: p.isScreenSharing,
       })),
-      chatMessages: paginatedMessages.map(m => ({
+      chatMessages: paginatedMessages.map((m) => ({
         userName: m.userId?.name || "System",
         message: m.message,
         timestamp: m.timestamp,
         messageType: m.messageType,
-        metadata: m.metadata
+        metadata: m.metadata,
       })),
       settings: liveSession.settings,
       userPermissions: {
         isTeacher: isUserTeacher,
         isAdmin: isUserAdmin,
         canManageSession: isUserTeacher || isUserAdmin,
-        userId: req.user.id
+        userId: req.user.id,
       },
       pagination: {
         currentPage: pageNum,
@@ -577,16 +525,9 @@ router.get("/session/:sessionId", verifyToken, async (req, res) => {
         totalMessages,
         hasNext: endIndex < totalMessages,
         hasPrev: startIndex > 0,
-        limit: limitNum
-      }
-    };
-
-    console.log("🔍 DEBUG: Sending response with", responseData.chatMessages.length, "chat messages");
-    console.log("🔍 DEBUG: First chat message:", responseData.chatMessages[0]);
-    console.log("🔍 DEBUG: Session isActive in response:", responseData.session.isActive);
-    console.log("🔍 DEBUG: Pagination info:", responseData.pagination);
-
-    res.json(responseData);
+        limit: limitNum,
+      },
+    });
 
   } catch (error) {
     console.error("❌ Error fetching session info:", error);
@@ -594,50 +535,48 @@ router.get("/session/:sessionId", verifyToken, async (req, res) => {
   }
 });
 
-// 🔹 Enhanced Raise/Lower Hand (Student) - UPDATED: Remove auto permission request
+// ─────────────────────────────────────────────
+// 🔹 Raise / Lower Hand
+// ─────────────────────────────────────────────
 router.put("/hand/:sessionId", verifyToken, async (req, res) => {
   try {
     const { sessionId } = req.params;
-    const { action } = req.body; // "raise" or "lower"
+    const { action } = req.body;
 
     if (!["raise", "lower"].includes(action)) {
       return res.status(400).json({ message: "Action must be 'raise' or 'lower'" });
     }
 
     const liveSession = await LiveSession.findById(sessionId);
-    if (!liveSession) {
-      return res.status(404).json({ message: "Live session not found" });
-    }
+    if (!liveSession) return res.status(404).json({ message: "Live session not found" });
 
-    // Find participant
     const participantIndex = liveSession.participants.findIndex(
-      p => p.studentId.toString() === req.user.id
+      (p) => p.studentId.toString() === req.user.id
     );
+    if (participantIndex === -1) return res.status(404).json({ message: "You are not in this live session" });
 
-    if (participantIndex === -1) {
-      return res.status(404).json({ message: "You are not in this live session" });
-    }
-
-    // Update hand raise status
     liveSession.participants[participantIndex].isHandRaised = action === "raise";
 
-    // Add system message for hand raise/lower
     const user = await User.findById(req.user.id);
-    const actionText = action === "raise" ? "raised hand" : "lowered hand";
-    
     liveSession.chatMessages.push({
       userId: req.user.id,
       userName: user.name,
-      message: `${user.name} ${actionText}`,
-      messageType: "system"
+      message: `${user.name} ${action === "raise" ? "raised hand" : "lowered hand"}`,
+      messageType: "system",
     });
 
     await liveSession.save();
 
-    res.json({
-      message: `Hand ${action}ed successfully`,
-      isHandRaised: action === "raise"
-    });
+    // Notify teacher via socket so they see the hand raise instantly
+    const io = req.app.get("io");
+    if (io && action === "raise") {
+      io.to(sessionId).emit("hand-raised", {
+        studentId: req.user.id,
+        studentName: user.name,
+      });
+    }
+
+    res.json({ message: `Hand ${action}ed successfully`, isHandRaised: action === "raise" });
 
   } catch (error) {
     console.error("Error updating hand status:", error);
@@ -645,7 +584,9 @@ router.put("/hand/:sessionId", verifyToken, async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────
 // 🔹 Send Chat Message
+// ─────────────────────────────────────────────
 router.post("/chat/:sessionId", verifyToken, async (req, res) => {
   try {
     const { sessionId } = req.params;
@@ -656,30 +597,35 @@ router.post("/chat/:sessionId", verifyToken, async (req, res) => {
     }
 
     const liveSession = await LiveSession.findById(sessionId);
-    if (!liveSession) {
-      return res.status(404).json({ message: "Live session not found" });
-    }
+    if (!liveSession) return res.status(404).json({ message: "Live session not found" });
 
     const user = await User.findById(req.user.id);
 
-    // Add chat message
-    liveSession.chatMessages.push({
+    const chatMsg = {
       userId: req.user.id,
       userName: user.name,
       message: message.trim(),
-      messageType: "text"
-    });
+      messageType: "text",
+      timestamp: new Date(),
+    };
 
+    liveSession.chatMessages.push(chatMsg);
     await liveSession.save();
+
+    // Broadcast via socket so all clients get it instantly without polling
+    const io = req.app.get("io");
+    if (io) {
+      io.to(sessionId).emit("new-chat-message", {
+        userName: user.name,
+        message: message.trim(),
+        timestamp: chatMsg.timestamp,
+        messageType: "text",
+      });
+    }
 
     res.json({
       message: "Chat message sent successfully",
-      chatMessage: {
-        userName: user.name,
-        message: message.trim(),
-        timestamp: new Date(),
-        messageType: "text"
-      }
+      chatMessage: { userName: user.name, message: message.trim(), timestamp: chatMsg.timestamp, messageType: "text" },
     });
 
   } catch (error) {
@@ -688,15 +634,15 @@ router.post("/chat/:sessionId", verifyToken, async (req, res) => {
   }
 });
 
-// 🔹 End Live Class (Teacher only) - UPDATED with socket emission
+// ─────────────────────────────────────────────
+// 🔹 End Live Class (Teacher only)
+// ─────────────────────────────────────────────
 router.put("/end/:sessionId", verifyToken, async (req, res) => {
   try {
     const { sessionId } = req.params;
 
     const liveSession = await LiveSession.findById(sessionId);
-    if (!liveSession) {
-      return res.status(404).json({ message: "Live session not found" });
-    }
+    if (!liveSession) return res.status(404).json({ message: "Live session not found" });
 
     if (liveSession.teacherId.toString() !== req.user.id) {
       return res.status(403).json({ message: "Only the teacher can end the live class" });
@@ -706,22 +652,17 @@ router.put("/end/:sessionId", verifyToken, async (req, res) => {
     liveSession.endTime = new Date();
     await liveSession.save();
 
-    // ✅ ADD: Get the socket.io instance and emit session end to all participants
     const io = req.app.get("io");
     if (io) {
       io.to(sessionId).emit("session-ended", {
         message: "Lesson has ended by teacher",
-        sessionId: sessionId,
+        sessionId,
         endedBy: req.user.id,
-        timestamp: new Date()
+        timestamp: new Date(),
       });
-      console.log(`🛑 Session ${sessionId} ended - socket notification sent`);
     }
 
-    res.json({
-      message: "Live class ended successfully",
-      sessionId: liveSession._id
-    });
+    res.json({ message: "Live class ended successfully", sessionId: liveSession._id });
 
   } catch (error) {
     console.error("Error ending live class:", error);
@@ -729,33 +670,33 @@ router.put("/end/:sessionId", verifyToken, async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────
 // 🔹 Leave Live Class
+// ─────────────────────────────────────────────
 router.put("/leave/:sessionId", verifyToken, async (req, res) => {
   try {
     const { sessionId } = req.params;
 
     const liveSession = await LiveSession.findById(sessionId);
-    if (!liveSession) {
-      return res.status(404).json({ message: "Live session not found" });
-    }
+    if (!liveSession) return res.status(404).json({ message: "Live session not found" });
 
-    // Update participant's leftAt time and calculate duration
     const participantIndex = liveSession.participants.findIndex(
-      p => p.studentId.toString() === req.user.id && !p.leftAt
+      (p) => p.studentId.toString() === req.user.id && !p.leftAt
     );
 
     if (participantIndex !== -1) {
       const participant = liveSession.participants[participantIndex];
       const now = new Date();
-
       participant.leftAt = now;
 
-      // Calculate duration
       if (participant.lastJoinTime) {
-        const duration = now - participant.lastJoinTime;
-        participant.totalTimeSpent += duration;
+        participant.totalTimeSpent += now - participant.lastJoinTime;
         participant.lastJoinTime = null;
       }
+
+      // Reset speaking permission on leave
+      participant.hasSpeakingPermission = false;
+      participant.isMuted = true;
 
       await liveSession.save();
     }
@@ -768,51 +709,36 @@ router.put("/leave/:sessionId", verifyToken, async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────
 // 🔹 Start Screen Sharing (Teacher only)
+// ─────────────────────────────────────────────
 router.post("/screen-share/start/:sessionId", verifyToken, async (req, res) => {
   try {
     const { sessionId } = req.params;
 
     const liveSession = await LiveSession.findById(sessionId);
-    if (!liveSession) {
-      return res.status(404).json({ message: "Live session not found" });
-    }
+    if (!liveSession) return res.status(404).json({ message: "Live session not found" });
 
-    // Check if user is teacher and owns the session
     if (liveSession.teacherId.toString() !== req.user.id) {
       return res.status(403).json({ message: "Only the teacher can start screen sharing" });
     }
 
-    // Find teacher participant
-    const teacherParticipantIndex = liveSession.participants.findIndex(
-      p => p.studentId.toString() === req.user.id
-    );
+    const idx = liveSession.participants.findIndex((p) => p.studentId.toString() === req.user.id);
+    if (idx === -1) return res.status(404).json({ message: "Teacher not found in session" });
 
-    if (teacherParticipantIndex === -1) {
-      return res.status(404).json({ message: "Teacher not found in session" });
-    }
+    liveSession.participants[idx].isScreenSharing = true;
 
-    // Update screen sharing status
-    liveSession.participants[teacherParticipantIndex].isScreenSharing = true;
-
-    // Add system message
     const teacher = await User.findById(req.user.id);
     liveSession.chatMessages.push({
       userId: req.user.id,
       userName: teacher.name,
       message: `${teacher.name} started screen sharing`,
       messageType: "system",
-      metadata: {
-        action: "screen_share_started"
-      }
+      metadata: { action: "screen_share_started" },
     });
 
     await liveSession.save();
-
-    res.json({
-      message: "Screen sharing started",
-      isScreenSharing: true
-    });
+    res.json({ message: "Screen sharing started", isScreenSharing: true });
 
   } catch (error) {
     console.error("Error starting screen sharing:", error);
@@ -820,51 +746,36 @@ router.post("/screen-share/start/:sessionId", verifyToken, async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────
 // 🔹 Stop Screen Sharing (Teacher only)
+// ─────────────────────────────────────────────
 router.post("/screen-share/stop/:sessionId", verifyToken, async (req, res) => {
   try {
     const { sessionId } = req.params;
 
     const liveSession = await LiveSession.findById(sessionId);
-    if (!liveSession) {
-      return res.status(404).json({ message: "Live session not found" });
-    }
+    if (!liveSession) return res.status(404).json({ message: "Live session not found" });
 
-    // Check if user is teacher and owns the session
     if (liveSession.teacherId.toString() !== req.user.id) {
       return res.status(403).json({ message: "Only the teacher can stop screen sharing" });
     }
 
-    // Find teacher participant
-    const teacherParticipantIndex = liveSession.participants.findIndex(
-      p => p.studentId.toString() === req.user.id
-    );
+    const idx = liveSession.participants.findIndex((p) => p.studentId.toString() === req.user.id);
+    if (idx === -1) return res.status(404).json({ message: "Teacher not found in session" });
 
-    if (teacherParticipantIndex === -1) {
-      return res.status(404).json({ message: "Teacher not found in session" });
-    }
+    liveSession.participants[idx].isScreenSharing = false;
 
-    // Update screen sharing status
-    liveSession.participants[teacherParticipantIndex].isScreenSharing = false;
-
-    // Add system message
     const teacher = await User.findById(req.user.id);
     liveSession.chatMessages.push({
       userId: req.user.id,
       userName: teacher.name,
       message: `${teacher.name} stopped screen sharing`,
       messageType: "system",
-      metadata: {
-        action: "screen_share_stopped"
-      }
+      metadata: { action: "screen_share_stopped" },
     });
 
     await liveSession.save();
-
-    res.json({
-      message: "Screen sharing stopped",
-      isScreenSharing: false
-    });
+    res.json({ message: "Screen sharing stopped", isScreenSharing: false });
 
   } catch (error) {
     console.error("Error stopping screen sharing:", error);
@@ -872,63 +783,43 @@ router.post("/screen-share/stop/:sessionId", verifyToken, async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────
 // 🔹 Start Recording (Teacher only)
+// ─────────────────────────────────────────────
 router.post("/recording/start/:sessionId", verifyToken, async (req, res) => {
   try {
     const { sessionId } = req.params;
 
     const liveSession = await LiveSession.findById(sessionId);
-    if (!liveSession) {
-      return res.status(404).json({ message: "Live session not found" });
-    }
+    if (!liveSession) return res.status(404).json({ message: "Live session not found" });
 
-    // Check if user is teacher and owns the session
     if (liveSession.teacherId.toString() !== req.user.id) {
       return res.status(403).json({ message: "Only the teacher can start recording" });
     }
 
-    // Check if already recording
     if (liveSession.recording.isRecording) {
       return res.status(400).json({ message: "Recording is already in progress" });
     }
 
-    // Generate unique resource ID and SID for recording
     const resourceId = `rec_${sessionId}_${Date.now()}`;
     const sid = `sid_${sessionId}_${Date.now()}`;
 
-    // Update session with recording info
-    liveSession.recording = {
-      isRecording: true,
-      startTime: new Date(),
-      resourceId,
-      sid
-    };
+    liveSession.recording = { isRecording: true, startTime: new Date(), resourceId, sid };
 
-    // Add system message
     const teacher = await User.findById(req.user.id);
     liveSession.chatMessages.push({
       userId: req.user.id,
       userName: teacher.name,
       message: `${teacher.name} started recording the session`,
       messageType: "system",
-      metadata: {
-        action: "recording_started"
-      }
+      metadata: { action: "recording_started" },
     });
 
     await liveSession.save();
 
-    // In a real implementation, you would call Agora Cloud Recording API here
-    console.log(`🎥 Recording started for session ${sessionId}`);
-
     res.json({
       message: "Recording started successfully",
-      recording: {
-        isRecording: true,
-        startTime: liveSession.recording.startTime,
-        resourceId,
-        sid
-      }
+      recording: { isRecording: true, startTime: liveSession.recording.startTime, resourceId, sid },
     });
 
   } catch (error) {
@@ -937,58 +828,46 @@ router.post("/recording/start/:sessionId", verifyToken, async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────
 // 🔹 Stop Recording (Teacher only)
+// ─────────────────────────────────────────────
 router.post("/recording/stop/:sessionId", verifyToken, async (req, res) => {
   try {
     const { sessionId } = req.params;
 
     const liveSession = await LiveSession.findById(sessionId);
-    if (!liveSession) {
-      return res.status(404).json({ message: "Live session not found" });
-    }
+    if (!liveSession) return res.status(404).json({ message: "Live session not found" });
 
-    // Check if user is teacher and owns the session
     if (liveSession.teacherId.toString() !== req.user.id) {
       return res.status(403).json({ message: "Only the teacher can stop recording" });
     }
 
-    // Check if recording is in progress
     if (!liveSession.recording.isRecording) {
       return res.status(400).json({ message: "No recording in progress" });
     }
 
-    // Update recording info
     liveSession.recording.isRecording = false;
     liveSession.recording.endTime = new Date();
-    
-    // Generate mock recording URL (in real implementation, this comes from Agora)
     liveSession.recording.recordingUrl = `https://your-storage-bucket.com/recordings/${sessionId}_${Date.now()}.mp4`;
-    
-    // Mock file list
     liveSession.recording.fileList = [{
       fileName: `recording_${sessionId}_${Date.now()}.mp4`,
       trackType: "audio_and_video",
       uid: "mixed",
       mixedAllUser: true,
       startTime: liveSession.recording.startTime,
-      endTime: new Date()
+      endTime: new Date(),
     }];
 
-    // Add system message
     const teacher = await User.findById(req.user.id);
     liveSession.chatMessages.push({
       userId: req.user.id,
       userName: teacher.name,
       message: `${teacher.name} stopped recording the session`,
       messageType: "system",
-      metadata: {
-        action: "recording_stopped"
-      }
+      metadata: { action: "recording_stopped" },
     });
 
     await liveSession.save();
-
-    console.log(`🎥 Recording stopped for session ${sessionId}`);
 
     res.json({
       message: "Recording stopped successfully",
@@ -997,8 +876,8 @@ router.post("/recording/stop/:sessionId", verifyToken, async (req, res) => {
         startTime: liveSession.recording.startTime,
         endTime: liveSession.recording.endTime,
         recordingUrl: liveSession.recording.recordingUrl,
-        duration: Math.round((liveSession.recording.endTime - liveSession.recording.startTime) / 1000 / 60) // in minutes
-      }
+        duration: Math.round((liveSession.recording.endTime - liveSession.recording.startTime) / 1000 / 60),
+      },
     });
 
   } catch (error) {
@@ -1007,47 +886,42 @@ router.post("/recording/stop/:sessionId", verifyToken, async (req, res) => {
   }
 });
 
+// ─────────────────────────────────────────────
 // 🔹 Get Recording Status
+// ─────────────────────────────────────────────
 router.get("/recording/status/:sessionId", verifyToken, async (req, res) => {
   try {
     const { sessionId } = req.params;
-
     const liveSession = await LiveSession.findById(sessionId);
-    if (!liveSession) {
-      return res.status(404).json({ message: "Live session not found" });
-    }
-
-    res.json({
-      recording: liveSession.recording
-    });
-
+    if (!liveSession) return res.status(404).json({ message: "Live session not found" });
+    res.json({ recording: liveSession.recording });
   } catch (error) {
     console.error("Error fetching recording status:", error);
     res.status(500).json({ message: "Failed to fetch recording status", error: error.message });
   }
 });
 
-// 🔹 Get Session Recordings (For playback after class)
+// ─────────────────────────────────────────────
+// 🔹 Get Session Recordings
+// ─────────────────────────────────────────────
 router.get("/recordings/:classId", verifyToken, async (req, res) => {
   try {
     const { classId } = req.params;
-
-    // Find all sessions for this class that have recordings
     const sessionsWithRecordings = await LiveSession.find({
       classId,
-      "recording.recordingUrl": { $exists: true, $ne: null }
+      "recording.recordingUrl": { $exists: true, $ne: null },
     })
-    .select("sessionTitle startTime endTime recording")
-    .sort({ startTime: -1 });
+      .select("sessionTitle startTime endTime recording")
+      .sort({ startTime: -1 });
 
     res.json({
-      recordings: sessionsWithRecordings.map(session => ({
+      recordings: sessionsWithRecordings.map((session) => ({
         sessionId: session._id,
         sessionTitle: session.sessionTitle,
         startTime: session.startTime,
         endTime: session.endTime,
-        recording: session.recording
-      }))
+        recording: session.recording,
+      })),
     });
 
   } catch (error) {
